@@ -74,8 +74,17 @@ export default function LoginPage() {
         } catch { /* profile fetch optional */ }
         return { user: { ...auth.user, name }, accessToken: auth.accessToken };
       } catch (err: any) {
-        // Demo mode fallback when backend is unreachable
-        if (err?.code === 'ERR_NETWORK' || err?.message?.includes('Network') || err?.response?.status >= 500 || !err?.response) {
+        // Demo mode fallback when backend is unreachable or not deployed
+        const status = err?.response?.status;
+        const isBackendUnreachable =
+          err?.code === 'ERR_NETWORK' ||
+          err?.message?.includes('Network') ||
+          err?.message?.includes('JSON') ||   // HTML returned instead of JSON
+          !err?.response ||                    // no response at all
+          status === 0 ||
+          status === 404 ||                    // no backend route (frontend only deploy)
+          status >= 500;
+        if (isBackendUnreachable) {
           const { DEMO_CREDENTIALS: creds } = await import('@/lib/mock-data');
           const match = creds.find(c => c.email === data.email && c.password === data.password);
           if (match) {
