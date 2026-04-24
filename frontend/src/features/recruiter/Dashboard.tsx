@@ -3,9 +3,7 @@ import { Briefcase, Users, CheckCircle, TrendingUp, ChevronRight, Target } from 
 import { Link } from 'react-router-dom';
 import StatCard from '@/components/shared/StatCard';
 import SectionCard from '@/components/shared/SectionCard';
-import CandidateMatchCard from '@/components/shared/CandidateMatchCard';
 import AIInsightCard from '@/components/shared/AIInsightCard';
-import { MOCK_MATCH_RESULTS, MOCK_JOBS } from '@/lib/mock-data';
 import { useAuthStore } from '@/stores/auth.store';
 import { useJobs } from '@/hooks/api';
 
@@ -18,8 +16,8 @@ const AI_INSIGHTS = [
 export default function RecruiterDashboard() {
   const { user } = useAuthStore();
   const { data: liveJobs } = useJobs();
-  const jobs = liveJobs ?? MOCK_JOBS;
-  const topMatches = MOCK_MATCH_RESULTS.slice(0, 3);
+  const jobs = liveJobs ?? [];
+  const topMatches = [];
 
   return (
     <div className="space-y-6">
@@ -45,7 +43,7 @@ export default function RecruiterDashboard() {
         <div className="lg:col-span-2 space-y-6">
           <SectionCard
             title="Top Candidate Matches"
-            subtitle="Ranked by AI match score"
+            subtitle="Run AI matching from the matches page to populate this section"
             icon={Target}
             action={
               <Link to="/recruiter/matches" className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
@@ -53,16 +51,9 @@ export default function RecruiterDashboard() {
               </Link>
             }
           >
-            <div className="grid gap-3">
-              {topMatches.map(match => (
-                <CandidateMatchCard
-                  key={match.id}
-                  match={match}
-                  onView={() => {}}
-                  onShortlist={() => {}}
-                />
-              ))}
-            </div>
+            {topMatches.length === 0 ? (
+              <div className="text-sm text-muted-foreground py-3">No live match results yet.</div>
+            ) : null}
           </SectionCard>
 
           <SectionCard title="Your Job Listings" icon={Briefcase}>

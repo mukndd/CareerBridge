@@ -3,6 +3,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { FilesService } from './files.service';
 import { FilesController } from './files.controller';
+import { DocumentExtractionService } from './document-extraction.service';
 
 @Global()
 @Module({
@@ -12,7 +13,7 @@ import { FilesController } from './files.controller';
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB global limit
     }),
   ],
-  providers: [FilesService],
+  providers: [FilesService, DocumentExtractionService],
   controllers: [FilesController],
   exports: [FilesService],
 })

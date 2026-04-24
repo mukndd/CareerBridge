@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Trophy, Plus, Star, Code, BookOpen, Award, Edit2, X, Loader2,
+  Trophy, Plus, Star, Code, BookOpen, Award, X, Loader2,
   CheckCircle2, XCircle, Github, ExternalLink, Briefcase, Medal,
   Users, FlaskConical, Mic2, Heart, GraduationCap,
 } from 'lucide-react';
@@ -12,12 +12,14 @@ import {
   useAddAchievement, useDeleteAchievement,
   useAddProject, useDeleteProject,
   useAddCertification, useDeleteCertification,
+  useReviewProject, useReviewCertification,
 } from '@/hooks/api';
-import type { Achievement, Project, Certification, AchievementType } from '@/types';
+import type { Achievement, Project, Certification, AchievementType, ProjectReviewResult, CertificationReviewResult } from '@/types';
+import type { ElementType, ReactElement } from 'react';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const ACHIEVEMENT_TYPE_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
+const ACHIEVEMENT_TYPE_CONFIG: Record<string, { icon: ElementType; color: string; bg: string; label: string }> = {
   HACKATHON:       { icon: Code,         color: 'text-purple-600', bg: 'bg-purple-50',     label: 'Hackathon' },
   INTERNSHIP:      { icon: Briefcase,    color: 'text-blue-600',   bg: 'bg-blue-50',       label: 'Internship' },
   PROJECT:         { icon: Github,       color: 'text-gray-700',   bg: 'bg-gray-100',      label: 'Project' },
@@ -37,7 +39,7 @@ const PROJ_CONFIG = { icon: Github, color: 'text-gray-700', bg: 'bg-gray-100' };
 // What category to add
 type AddCategory = 'achievement' | 'project' | 'certification';
 
-const CATEGORY_TABS: { id: AddCategory; label: string; icon: React.ElementType }[] = [
+const CATEGORY_TABS: { id: AddCategory; label: string; icon: ElementType }[] = [
   { id: 'achievement', label: 'Achievement', icon: Trophy },
   { id: 'project',     label: 'Project',     icon: Github },
   { id: 'certification', label: 'Certification', icon: Award },
@@ -92,7 +94,6 @@ function GitHubVerifier({
     setStatus('idle');
     setMeta(null);
     onStatusChange('idle');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
 
   if (!url.trim()) return null;
@@ -142,6 +143,7 @@ interface AddModalProps { onClose: () => void }
 
 function AddModal({ onClose }: AddModalProps) {
   const [category, setCategory] = useState<AddCategory>('achievement');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Achievement form
   const [achType, setAchType] = useState<AchievementType>('HACKATHON');
@@ -164,7 +166,8 @@ function AddModal({ onClose }: AddModalProps) {
   const [projStart, setProjStart] = useState('');
   const [projEnd, setProjEnd] = useState('');
   const [projOngoing, setProjOngoing] = useState(false);
-  const [ghStatus, setGhStatus] = useState<GitHubStatus>('idle');
+  const [, setGhStatus] = useState<GitHubStatus>('idle');
+  const [projectReview, setProjectReview] = useState<ProjectReviewResult | null>(null);
 
   // Certification form
   const [certName, setCertName] = useState('');
@@ -174,10 +177,13 @@ function AddModal({ onClose }: AddModalProps) {
   const [certId, setCertId] = useState('');
   const [certUrl, setCertUrl] = useState('');
   const [certDesc, setCertDesc] = useState('');
+  const [certReview, setCertReview] = useState<CertificationReviewResult | null>(null);
 
   const addAchievement = useAddAchievement();
   const addProject = useAddProject();
   const addCertification = useAddCertification();
+  const reviewProject = useReviewProject();
+  const reviewCertification = useReviewCertification();
 
   const isPending = addAchievement.isPending || addProject.isPending || addCertification.isPending;
 
@@ -258,12 +264,17 @@ function AddModal({ onClose }: AddModalProps) {
           {CATEGORY_TABS.map(tab => {
             const Icon = tab.icon;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setCategory(tab.id)}
-                className={cn(
-                  'flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border transition-all flex-1 justify-center',
-                  category === tab.id
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setCategory(tab.id);
+                    setShowAdvanced(false);
+                    setProjectReview(null);
+                    setCertReview(null);
+                  }}
+                  className={cn(
+                    'flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border transition-all flex-1 justify-center',
+                    category === tab.id
                     ? 'bg-brand-oxford text-white border-brand-oxford'
                     : 'bg-white text-muted-foreground border-border hover:border-brand-oxford/30',
                 )}
@@ -356,28 +367,87 @@ function AddModal({ onClose }: AddModalProps) {
                   />
                 </Field>
                 <GitHubVerifier url={projRepo} onStatusChange={(s) => setGhStatus(s)} />
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const review = await reviewProject.mutateAsync({
+                          title: projTitle,
+                          description: projDesc,
+                          repoUrl: projRepo || undefined,
+                          liveUrl: projLive || undefined,
+                          techStack: projTech ? projTech.split(',').map(s => s.trim()).filter(Boolean) : [],
+                          highlights: projHighlights ? projHighlights.split('\n').map(s => s.trim()).filter(Boolean) : [],
+                        });
+                        setProjectReview(review);
+                      } catch {
+                        setProjectReview({
+                          verdict: 'needs_review',
+                          score: 0,
+                          summary: 'Project review could not reach GitHub, so manual review is needed.',
+                          reasons: [],
+                          warnings: ['GitHub check failed.'],
+                        });
+                      }
+                    }}
+                    className="text-xs font-semibold text-brand-oxford border border-brand-oxford/30 px-3 py-1.5 rounded-lg hover:bg-brand-oxford/5 transition-colors"
+                  >
+                    Review project
+                  </button>
+                  {projectReview && (
+                    <span className={cn(
+                      'text-[11px] font-semibold px-2.5 py-1 rounded-full border',
+                      projectReview.verdict === 'likely_authentic'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : projectReview.verdict === 'needs_review'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-red-50 text-red-700 border-red-200',
+                    )}>
+                      {projectReview.verdict.replace(/_/g, ' ')} · {projectReview.score}%
+                    </span>
+                  )}
+                </div>
+                {projectReview && (
+                  <div className="mt-2 rounded-xl border border-border bg-gray-50 p-3 text-xs text-muted-foreground space-y-1.5">
+                    <p className="font-semibold text-foreground">{projectReview.summary}</p>
+                    {projectReview.reasons.slice(0, 3).map((reason) => <p key={reason}>• {reason}</p>)}
+                    {projectReview.warnings.slice(0, 2).map((warning) => <p key={warning} className="text-amber-700">• {warning}</p>)}
+                  </div>
+                )}
               </div>
-              <Field label="Live Demo URL">
-                <input value={projLive} onChange={e => setProjLive(e.target.value)} placeholder="https://myproject.vercel.app" type="url" />
-              </Field>
               <Field label="Tech Stack" hint="comma-separated">
                 <input value={projTech} onChange={e => setProjTech(e.target.value)} placeholder="React, Node.js, PostgreSQL, OpenAI" />
               </Field>
-              <Field label="Key Highlights" hint="one per line">
-                <textarea value={projHighlights} onChange={e => setProjHighlights(e.target.value)} rows={3} placeholder={"Reduced latency by 40%\nHandled 1000+ concurrent users\nIntegrated 3 AI models"} />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Start Date">
-                  <input type="date" value={projStart} onChange={e => setProjStart(e.target.value)} />
-                </Field>
-                <Field label="End Date">
-                  <input type="date" value={projEnd} onChange={e => setProjEnd(e.target.value)} disabled={projOngoing} />
-                </Field>
-              </div>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                <input type="checkbox" checked={projOngoing} onChange={e => setProjOngoing(e.target.checked)} className="rounded" />
-                Currently working on this
-              </label>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(v => !v)}
+                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                {showAdvanced ? 'Hide advanced fields' : 'Show advanced fields'}
+              </button>
+              {showAdvanced && (
+                <>
+                  <Field label="Live Demo URL">
+                    <input value={projLive} onChange={e => setProjLive(e.target.value)} placeholder="https://myproject.vercel.app" type="url" />
+                  </Field>
+                  <Field label="Key Highlights" hint="one per line">
+                    <textarea value={projHighlights} onChange={e => setProjHighlights(e.target.value)} rows={3} placeholder={"Reduced latency by 40%\nHandled 1000+ concurrent users\nIntegrated 3 AI models"} />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Start Date">
+                      <input type="date" value={projStart} onChange={e => setProjStart(e.target.value)} />
+                    </Field>
+                    <Field label="End Date">
+                      <input type="date" value={projEnd} onChange={e => setProjEnd(e.target.value)} disabled={projOngoing} />
+                    </Field>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <input type="checkbox" checked={projOngoing} onChange={e => setProjOngoing(e.target.checked)} className="rounded" />
+                    Currently working on this
+                  </label>
+                </>
+              )}
             </>
           )}
 
@@ -390,23 +460,79 @@ function AddModal({ onClose }: AddModalProps) {
               <Field label="Issuing Organization *" required>
                 <input value={certOrg} onChange={e => setCertOrg(e.target.value)} placeholder="e.g. Amazon Web Services, Coursera, Google" />
               </Field>
-              <Field label="Description">
-                <textarea value={certDesc} onChange={e => setCertDesc(e.target.value)} rows={2} placeholder="What skills does this certification validate?" />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Issue Date">
-                  <input type="date" value={certIssueDate} onChange={e => setCertIssueDate(e.target.value)} />
-                </Field>
-                <Field label="Expiry Date">
-                  <input type="date" value={certExpiry} onChange={e => setCertExpiry(e.target.value)} />
-                </Field>
-              </div>
               <Field label="Credential ID">
                 <input value={certId} onChange={e => setCertId(e.target.value)} placeholder="e.g. ABC-123-XYZ" />
               </Field>
               <Field label="Credential URL">
                 <input value={certUrl} onChange={e => setCertUrl(e.target.value)} placeholder="https://www.credly.com/badges/..." type="url" />
               </Field>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const review = await reviewCertification.mutateAsync({
+                      name: certName,
+                      issuingOrganization: certOrg,
+                      credentialId: certId || undefined,
+                      credentialUrl: certUrl || undefined,
+                      description: certDesc || undefined,
+                      issueDate: certIssueDate || undefined,
+                      expiryDate: certExpiry || undefined,
+                    });
+                    setCertReview(review);
+                  } catch {
+                    setCertReview({
+                      verdict: 'needs_review',
+                      score: 0,
+                      summary: 'Certification review could not be completed right now.',
+                      reasons: [],
+                      warnings: ['Validation service unavailable.'],
+                    });
+                  }
+                }}
+                className="text-xs font-semibold text-brand-oxford border border-brand-oxford/30 px-3 py-1.5 rounded-lg hover:bg-brand-oxford/5 transition-colors"
+              >
+                Review certification
+              </button>
+              {certReview && (
+                <div className="rounded-xl border border-border bg-gray-50 p-3 text-xs text-muted-foreground space-y-1.5">
+                  <div className={cn(
+                    'inline-flex text-[11px] font-semibold px-2.5 py-1 rounded-full border',
+                    certReview.verdict === 'verified'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : certReview.verdict === 'needs_review'
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-red-50 text-red-700 border-red-200',
+                  )}>
+                    {certReview.verdict.replace(/_/g, ' ')} · {certReview.score}%
+                  </div>
+                  <p className="font-semibold text-foreground">{certReview.summary}</p>
+                  {certReview.reasons.slice(0, 3).map((reason) => <p key={reason}>• {reason}</p>)}
+                  {certReview.warnings.slice(0, 2).map((warning) => <p key={warning} className="text-amber-700">• {warning}</p>)}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(v => !v)}
+                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                {showAdvanced ? 'Hide advanced fields' : 'Show advanced fields'}
+              </button>
+              {showAdvanced && (
+                <>
+                  <Field label="Description">
+                    <textarea value={certDesc} onChange={e => setCertDesc(e.target.value)} rows={2} placeholder="What skills does this certification validate?" />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Issue Date">
+                      <input type="date" value={certIssueDate} onChange={e => setCertIssueDate(e.target.value)} />
+                    </Field>
+                    <Field label="Expiry Date">
+                      <input type="date" value={certExpiry} onChange={e => setCertExpiry(e.target.value)} />
+                    </Field>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
@@ -436,10 +562,10 @@ function AddModal({ onClose }: AddModalProps) {
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
 function Field({ label, hint, required, children }: {
-  label: string; hint?: string; required?: boolean; children: React.ReactElement;
+  label: string; hint?: string; required?: boolean; children: ReactElement;
 }) {
   const INPUT_CLS = 'w-full text-sm px-3.5 py-2.5 rounded-xl border border-border bg-white outline-none focus:border-brand-oxford transition-all resize-none';
-  const child = children as React.ReactElement<{ className?: string }>;
+  const child = children as ReactElement<{ className?: string }>;
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">

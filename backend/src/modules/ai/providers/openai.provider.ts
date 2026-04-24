@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import {
   IAIProvider,
   ParsedResumeContent,
@@ -15,37 +15,47 @@ import { RESUME_TEMPLATE_HTML } from '../templates/resume.template';
 import { extractSkillsLocal, extractJDSkillsLocal } from '../skill-extractor.util';
 
 @Injectable()
-export class OpenAIProvider implements IAIProvider {
-  private readonly client: OpenAI;
+export class AnthropicProvider implements IAIProvider {
+  private readonly client: Anthropic;
   private readonly model: string;
-  private readonly embeddingModel: string;
-  private readonly logger = new Logger('OpenAIProvider');
+  private readonly logger = new Logger('AnthropicProvider');
 
   constructor(private readonly configService: ConfigService) {
-    this.client = new OpenAI({
-      apiKey: this.configService.get<string>('app.openai.apiKey'),
+    this.client = new Anthropic({
+      apiKey: this.configService.get<string>('app.anthropic.apiKey'),
     });
-    this.model = this.configService.get<string>('app.openai.model', 'gpt-4o');
-    this.embeddingModel = this.configService.get<string>('app.openai.embeddingModel', 'text-embedding-3-small');
+    this.model = this.configService.get<string>('app.anthropic.model', 'claude-sonnet-4-5');
   }
 
   private async chat(systemPrompt: string, userContent: string, temperature = 0.2): Promise<string> {
     try {
-      const response = await this.client.chat.completions.create({
+      const response = await this.client.messages.create({
         model: this.model,
+        max_tokens: 4096,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
+          {
+            role: 'user',
+            content: `${systemPrompt}\n\n${userContent}`,
+          },
         ],
         temperature,
-        response_format: { type: 'json_object' },
-        max_tokens: this.configService.get<number>('app.openai.maxTokens', 4096),
       });
-      return response.choices[0]?.message?.content || '{}';
+      const block = response.content[0];
+      return block.type === 'text' ? block.text : '{}';
     } catch (error) {
-      this.logger.error('OpenAI API error:', error.message);
+      this.logger.error('Anthropic API error:', error.message);
       throw error;
     }
+  }
+
+  private extractJSON(raw: string): string {
+    // Strip markdown code fences if Claude wraps output in them
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) return fenced[1].trim();
+    // Try to find first { or [ and return from there
+    const start = raw.search(/[{[]/);
+    if (start !== -1) return raw.slice(start);
+    return raw.trim();
   }
 
   async parseResume(rawText: string): Promise<ParsedResumeContent> {
@@ -59,10 +69,10 @@ Return a JSON object with these fields:
 - skills: array of strings
 - certifications: array of { name, issuer, year }
 - achievements: array of strings
-Return ONLY valid JSON.`;
+Respond with ONLY valid JSON, no markdown fences.`;
 
     const result = await this.chat(system, `Parse this resume:\n\n${rawText}`);
-    return JSON.parse(result) as ParsedResumeContent;
+    return JSON.parse(this.extractJSON(result)) as ParsedResumeContent;
   }
 
   async extractSkillsFromText(text: string, _context: string): Promise<ExtractedSkill[]> {
@@ -73,7 +83,7 @@ Return ONLY valid JSON.`;
     // Extract skills locally (no API call needed)
     const { requiredSkills, preferredSkills } = extractJDSkillsLocal(rawText);
 
-    // Use OpenAI only for metadata (title, company, CTC, branches, etc.)
+    // Use Claude only for metadata
     const system = `You are an expert at parsing campus placement job descriptions for Indian universities.
 
 Extract structured metadata from the JD. Return JSON with:
@@ -95,14 +105,14 @@ Extract structured metadata from the JD. Return JSON with:
 - additionalNotes: string
 
 Do NOT include requiredSkills or preferredSkills — those are handled separately.
-Return ONLY valid JSON.`;
+Respond with ONLY valid JSON, no markdown fences.`;
 
     try {
       const result = await this.chat(system, `Parse this JD:\n\n${rawText}`);
-      const metadata = JSON.parse(result) as ParsedJobDescription;
+      const metadata = JSON.parse(this.extractJSON(result)) as ParsedJobDescription;
       return { ...metadata, requiredSkills, preferredSkills };
     } catch {
-      // If OpenAI fails, return skill-only result
+      // If Claude fails, return skill-only result
       return { requiredSkills, preferredSkills };
     }
   }
@@ -130,11 +140,12 @@ Return JSON:
     }
   ],
   "atsKeywords": ["keyword1", "keyword2"]
-}`;
+}
+Respond with ONLY valid JSON, no markdown fences.`;
 
     const userContent = JSON.stringify(input, null, 2);
     const result = await this.chat(system, `Generate resume for:\n${userContent}`, 0.4);
-    const parsed = JSON.parse(result) as GeneratedResume;
+    const parsed = JSON.parse(this.extractJSON(result)) as GeneratedResume;
     parsed.htmlContent = RESUME_TEMPLATE_HTML(parsed);
     return parsed;
   }
@@ -159,15 +170,15 @@ Return JSON:
   "suggestedSkills": [{ "name": "...", "rawName": "...", "confidence": "MEDIUM", "category": "...", "source": "inferred", "inferenceReason": "..." }],
   "enhancementNotes": ["Note 1", "Note 2"],
   "htmlContent": ""
-}`;
+}
+Respond with ONLY valid JSON, no markdown fences.`;
 
     const result = await this.chat(
       system,
       `Parsed resume: ${JSON.stringify(parsedContent)}\n\nRaw text: ${rawText.substring(0, 3000)}`,
       0.4,
     );
-    const enhanced = JSON.parse(result) as EnhancedResume;
-    // Generate HTML for enhanced resume
+    const enhanced = JSON.parse(this.extractJSON(result)) as EnhancedResume;
     return enhanced;
   }
 
@@ -197,22 +208,21 @@ Return JSON:
   "highlightedSkills": ["skill1", "skill2"],
   "tailoringNotes": ["Note explaining key changes"],
   "htmlContent": ""
-}`;
+}
+Respond with ONLY valid JSON, no markdown fences.`;
 
     const result = await this.chat(
       system,
       `Student data: ${JSON.stringify(studentData)}\n\nJob Description: ${JSON.stringify(jobDescription)}\n\nRaw JD: ${rawJdText.substring(0, 2000)}`,
       0.5,
     );
-    return JSON.parse(result) as TailoredResume;
+    return JSON.parse(this.extractJSON(result)) as TailoredResume;
   }
 
-  async generateEmbedding(text: string): Promise<number[]> {
-    const response = await this.client.embeddings.create({
-      model: this.embeddingModel,
-      input: text.substring(0, 8000), // max tokens
-    });
-    return response.data[0].embedding;
+  async generateEmbedding(_text: string): Promise<number[]> {
+    // Anthropic does not provide an embeddings API.
+    // computeSemanticSimilarity catches this and returns 0.
+    throw new Error('Embeddings not supported with Anthropic provider');
   }
 
   async normalizeSkillName(rawSkillName: string): Promise<string> {
@@ -220,16 +230,24 @@ Return JSON:
     const normalized = SKILL_NORMALIZATIONS[rawSkillName.toLowerCase().trim()];
     if (normalized) return normalized;
 
-    // Fall back to LLM
+    // Fall back to Claude
     const system = `You are a skill name normalizer. Given a raw skill name, return the canonical normalized version.
 Examples: "JS" => "JavaScript", "Postgres" => "PostgreSQL", "Node" => "Node.js", "ML" => "Machine Learning"
-Return ONLY the canonical name as JSON: { "canonical": "..." }`;
+Return ONLY the canonical name as JSON: { "canonical": "..." }
+Respond with ONLY valid JSON, no markdown fences.`;
 
-    const result = await this.chat(system, `Normalize: "${rawSkillName}"`);
-    const parsed = JSON.parse(result);
-    return parsed.canonical || rawSkillName;
+    try {
+      const result = await this.chat(system, `Normalize: "${rawSkillName}"`);
+      const parsed = JSON.parse(this.extractJSON(result));
+      return parsed.canonical || rawSkillName;
+    } catch {
+      return rawSkillName;
+    }
   }
 }
+
+// Keep alias for backward compatibility in ai.service.ts import
+export { AnthropicProvider as OpenAIProvider };
 
 // Deterministic skill normalization table (fast path before LLM)
 const SKILL_NORMALIZATIONS: Record<string, string> = {

@@ -104,11 +104,22 @@ export class CreateJobDto {
   @IsOptional()
   @IsString()
   additionalEligibilityNotes?: string;
-}
 
-export class UpdateJobDto extends CreateJobDto {
   @ApiPropertyOptional({ enum: JobStatus })
   @IsOptional()
   @IsEnum(JobStatus)
   status?: JobStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  rawJdText?: string;
+
+  @ApiPropertyOptional({ example: ['backend', 'cloud', 'distributed systems'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  keywords?: string[];
 }
+
+export class UpdateJobDto extends CreateJobDto {}

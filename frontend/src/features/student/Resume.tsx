@@ -12,6 +12,7 @@ import { MOCK_RESUMES } from '@/lib/mock-data';
 import { useStudentResumes, useUploadResume, useGenerateResume } from '@/hooks/api';
 import { parseResume, parseJobDescriptionSkills } from '@/lib/resume-parser';
 import { cn } from '@/lib/utils';
+import type { ResumeUploadResponse, ParsedResumeContent } from '@/types';
 
 type Flow = null | 'upload' | 'generate' | 'enhance' | 'tailor';
 
@@ -73,13 +74,33 @@ function UploadFlow({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  const handleParse = () => {
-    const textToParse = inputMode === 'paste' ? resumeText : resumeText;
+  const extractSkills = (parsed: ParsedResumeContent | undefined, fallbackText: string): string[] => {
+    const skillsFromBackend = parsed?.skills?.filter(Boolean).map(s => s.trim()).filter(Boolean) ?? [];
+    if (skillsFromBackend.length > 0) return skillsFromBackend;
+
+    const result = parseResume(fallbackText || '');
+    const skills: string[] = [];
+    for (const [cat, entries] of Object.entries(result.byCategory)) {
+      if (cat === 'Inferred Skills') continue;
+      for (const e of entries) skills.push(e.name);
+    }
+    return skills;
+  };
+
+  const handleParse = async () => {
     setStep(1);
 
-    // Run local skill extraction
-    setTimeout(() => {
-      const result = parseResume(textToParse || '');
+    try {
+      if (inputMode === 'file' && file) {
+        const response = await uploadMutation.mutateAsync(file) as ResumeUploadResponse;
+        const backendParsed = response.parsedContent ?? (response.resume.structuredContent as ParsedResumeContent | undefined);
+        const backendSkills = extractSkills(backendParsed, resumeText);
+        setParsedSkills(backendSkills);
+        setStep(2);
+        return;
+      }
+
+      const result = parseResume(resumeText || '');
       const skills: string[] = [];
       for (const [cat, entries] of Object.entries(result.byCategory)) {
         if (cat === 'Inferred Skills') continue;
@@ -87,11 +108,15 @@ function UploadFlow({ onClose }: { onClose: () => void }) {
       }
       setParsedSkills(skills);
       setStep(2);
-    }, 400);
-
-    // Also upload to backend if file provided (for PDF/DOCX server-side parsing)
-    if (file && inputMode === 'file') {
-      uploadMutation.mutate(file);
+    } catch {
+      const result = parseResume(resumeText || '');
+      const skills: string[] = [];
+      for (const [cat, entries] of Object.entries(result.byCategory)) {
+        if (cat === 'Inferred Skills') continue;
+        for (const e of entries) skills.push(e.name);
+      }
+      setParsedSkills(skills);
+      setStep(2);
     }
   };
 

@@ -141,3 +141,35 @@ export function truncate(str: string, n: number): string {
 export function slugify(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
+
+type MatchLike = {
+  id: string;
+  studentProfileId?: string | null;
+  studentProfile?: {
+    id?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+  } | null;
+  overallMatchPercentage?: number | null;
+};
+
+function getMatchStudentKey(match: MatchLike): string {
+  if (match.studentProfileId) return match.studentProfileId;
+  if (match.studentProfile?.id) return match.studentProfile.id;
+  const firstName = match.studentProfile?.firstName?.trim() ?? '';
+  const lastName = match.studentProfile?.lastName?.trim() ?? '';
+  if (firstName || lastName) return `${firstName} ${lastName}`.trim().toLowerCase();
+  return match.id;
+}
+
+export function dedupeMatchResultsByStudent<T extends MatchLike>(matches: T[]): T[] {
+  const ranked = [...matches].sort((a, b) => (b.overallMatchPercentage ?? 0) - (a.overallMatchPercentage ?? 0));
+  const seen = new Set<string>();
+
+  return ranked.filter(match => {
+    const key = getMatchStudentKey(match);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

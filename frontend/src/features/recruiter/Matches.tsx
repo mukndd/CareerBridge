@@ -1,17 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Target, SlidersHorizontal, Search } from 'lucide-react';
+import { Target, SlidersHorizontal, Search, Loader2 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import CandidateMatchCard from '@/components/shared/CandidateMatchCard';
 import EmptyState from '@/components/shared/EmptyState';
-import { MOCK_MATCH_RESULTS, MOCK_JOBS } from '@/lib/mock-data';
-import { useJobs, useJobMatches } from '@/hooks/api';
-import { cn } from '@/lib/utils';
+import StudentInsightModal from '@/components/shared/StudentInsightModal';
+import { apiGet } from '@/lib/api';
+import { useJobs, useJobMatches, useRunMatching } from '@/hooks/api';
+import { cn, dedupeMatchResultsByStudent } from '@/lib/utils';
+import type { MatchResult } from '@/types';
 
 export default function RecruiterMatches() {
-  const [selectedJob, setSelectedJob] = useState('all');
+  const [selectedJob, setSelectedJob] = useState('');
   const [search, setSearch] = useState('');
   const [minScore, setMinScore] = useState(0);
   const [shortlisted, setShortlisted] = useState<Set<string>>(new Set());
+  const [aggregateMatches, setAggregateMatches] = useState<MatchResult[] | null>(null);
+  const [aggregateLoading, setAggregateLoading] = useState(false);
+  const [selectedMatch, setSelectedMatch] = useState<MatchResult | null>(null);
+  const [initializedJob, setInitializedJob] = useState(false);
+  const autoRunJobs = useRef<Set<string>>(new Set());
+  const [searchParams] = useSearchParams();
 
   const toggleShortlist = (id: string) => {
     setShortlisted(prev => {
@@ -23,12 +32,80 @@ export default function RecruiterMatches() {
 
   const { data: liveJobs } = useJobs();
   const { data: liveMatches } = useJobMatches(selectedJob !== 'all' ? selectedJob : '');
+  const runMatching = useRunMatching();
 
-  const allJobs = liveJobs ?? MOCK_JOBS;
-  const allMatches = (selectedJob !== 'all' && liveMatches ? liveMatches : null) ?? MOCK_MATCH_RESULTS;
+  useEffect(() => {
+    const jobId = searchParams.get('jobId');
+    if (jobId) {
+      setSelectedJob(jobId);
+      setInitializedJob(true);
+      return;
+    }
+    if (!initializedJob && liveJobs?.length) {
+      const withApplicants = liveJobs.find((job) => (job._count?.applications ?? 0) > 0);
+      setSelectedJob(withApplicants?.id ?? liveJobs[0].id);
+      setInitializedJob(true);
+    }
+  }, [initializedJob, liveJobs, searchParams]);
 
-  const filtered = allMatches.filter(m => {
-    const matchJob = selectedJob === 'all' || m.jobId === selectedJob;
+  useEffect(() => {
+    let cancelled = false;
+    const loadAllMatches = async () => {
+      if (selectedJob && selectedJob !== 'all') {
+        setAggregateMatches(null);
+        return;
+      }
+      if (!liveJobs?.length) {
+        setAggregateMatches([]);
+        return;
+      }
+
+      setAggregateLoading(true);
+      try {
+        const results = await Promise.all(
+          liveJobs.map((job) => apiGet<MatchResult[]>(`/jobs/${job.id}/matches`)),
+        );
+        if (!cancelled) {
+          setAggregateMatches(results.flat());
+        }
+      } catch {
+        if (!cancelled) {
+          setAggregateMatches([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setAggregateLoading(false);
+        }
+      }
+    };
+
+    void loadAllMatches();
+    return () => {
+      cancelled = true;
+    };
+  }, [liveJobs, selectedJob]);
+
+  useEffect(() => {
+    if (!selectedJob || selectedJob === 'all') return;
+    if (!liveJobs?.length) return;
+    if (runMatching.isPending) return;
+    if (autoRunJobs.current.has(selectedJob)) return;
+    if (!liveMatches) return;
+    if (liveMatches.length > 0) return;
+
+    const selected = liveJobs.find((job) => job.id === selectedJob);
+    if (!selected) return;
+
+    autoRunJobs.current.add(selectedJob);
+    runMatching.mutate(selectedJob);
+  }, [liveJobs, liveMatches, runMatching, selectedJob]);
+
+  const allJobs = liveJobs ?? [];
+  const allMatches = selectedJob === 'all' || !selectedJob ? (aggregateMatches ?? []) : (liveMatches ?? []);
+  const visibleMatches = selectedJob === 'all' || !selectedJob ? dedupeMatchResultsByStudent(allMatches) : allMatches;
+
+  const filtered = visibleMatches.filter(m => {
+    const matchJob = selectedJob === 'all' || !selectedJob || m.jobId === selectedJob;
     const matchScore = m.overallMatchPercentage >= minScore;
     const studentName = m.studentProfile ? `${m.studentProfile.firstName} ${m.studentProfile.lastName}` : '';
     const matchSearch = !search || studentName.toLowerCase().includes(search.toLowerCase());
@@ -58,6 +135,7 @@ export default function RecruiterMatches() {
           onChange={e => setSelectedJob(e.target.value)}
           className="text-sm px-3.5 py-2.5 rounded-xl border border-border bg-white outline-none focus:border-brand-oxford transition-all"
         >
+          <option value="">Select a job</option>
           <option value="all">All Jobs</option>
           {allJobs.map(j => (
             <option key={j.id} value={j.id}>{j.title}</option>
@@ -88,8 +166,19 @@ export default function RecruiterMatches() {
         <span className="text-blue-600 font-semibold">{shortlisted.size} shortlisted</span>
       </div>
 
-      {filtered.length === 0 ? (
-        <EmptyState icon={Target} title="No matches found" description="Try adjusting your filters or run AI matching." />
+      {(selectedJob === 'all' || !selectedJob) && aggregateLoading && !aggregateMatches ? (
+        <div className="flex items-center gap-3 py-10 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Loading live matches...
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={Target}
+          title="No matches found"
+          description={selectedJob === 'all'
+            ? 'Select a specific job to load live candidate matches.'
+            : 'Try adjusting filters or run AI matching for this job.'}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((match, i) => (
@@ -101,7 +190,7 @@ export default function RecruiterMatches() {
             >
               <CandidateMatchCard
                 match={match}
-                onView={() => {}}
+                onView={() => setSelectedMatch(match)}
                 onShortlist={() => toggleShortlist(match.id)}
                 isShortlisted={shortlisted.has(match.id)}
               />
@@ -109,6 +198,15 @@ export default function RecruiterMatches() {
           ))}
         </div>
       )}
+
+      <StudentInsightModal
+        open={Boolean(selectedMatch)}
+        onClose={() => setSelectedMatch(null)}
+        student={selectedMatch?.studentProfile ?? { firstName: '', lastName: '', department: '', activeBacklogs: 0, profileCompleteness: 0 }}
+        match={selectedMatch}
+        title="Candidate profile"
+        subtitle="Match explanation, scores, and partial eligibility reasons"
+      />
     </div>
   );
 }

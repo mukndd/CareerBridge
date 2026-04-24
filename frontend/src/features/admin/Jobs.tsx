@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Briefcase, Plus, Search, MapPin, Clock, Users, ChevronRight } from 'lucide-react';
+import { Briefcase, Plus, Search, MapPin, Clock, Users, ChevronRight, X, Play, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import EmptyState from '@/components/shared/EmptyState';
 import SkillChip from '@/components/shared/SkillChip';
-import { MOCK_JOBS } from '@/lib/mock-data';
 import { useAdminJobs, useAdminRunMatching } from '@/hooks/api';
 import { cn } from '@/lib/utils';
 
@@ -16,22 +16,30 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function AdminJobs() {
   const [search, setSearch] = useState('');
+  const [selectedJob, setSelectedJob] = useState<any | null>(null);
+  const [searchParams] = useSearchParams();
 
   const { data: liveJobs } = useAdminJobs();
   const runMatchingMutation = useAdminRunMatching();
-  const allJobs = liveJobs ?? MOCK_JOBS;
+  const allJobs = liveJobs ?? [];
+  const companyId = searchParams.get('companyId');
 
-  const filtered = allJobs.filter(j =>
-    j.title?.toLowerCase().includes(search.toLowerCase()) ||
-    j.company?.name?.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = useMemo(() => allJobs.filter(j => {
+    const matchesSearch =
+      j.title?.toLowerCase().includes(search.toLowerCase()) ||
+      j.company?.name?.toLowerCase().includes(search.toLowerCase());
+    const matchesCompany = !companyId || j.companyId === companyId;
+    return matchesSearch && matchesCompany;
+  }), [allJobs, companyId, search]);
 
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-black text-brand-oxford">Job Listings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{allJobs.length} active positions</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {filtered.length} active positions{companyId ? ' for the selected company' : ''}
+          </p>
         </div>
         <button className="flex items-center gap-1.5 text-xs font-semibold bg-brand-oxford text-white px-3.5 py-2 rounded-xl">
           <Plus className="w-3.5 h-3.5" /> Post Job
@@ -70,7 +78,8 @@ export default function AdminJobs() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: i * 0.05 }}
-                    className="hover:bg-gray-50/50 transition-colors"
+                    className="hover:bg-gray-50/50 transition-colors cursor-pointer"
+                    onClick={() => setSelectedJob(job)}
                   >
                     <td className="px-4 py-3 pl-5">
                       <div>
@@ -102,7 +111,10 @@ export default function AdminJobs() {
                       </span>
                     </td>
                     <td className="px-4 py-3 pr-5">
-                      <button className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline whitespace-nowrap">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelectedJob(job); }}
+                        className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline whitespace-nowrap"
+                      >
                         Manage <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </td>
@@ -110,6 +122,73 @@ export default function AdminJobs() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {selectedJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/45" onClick={() => setSelectedJob(null)} />
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+              <div>
+                <p className="text-sm font-black text-brand-oxford">{selectedJob.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{selectedJob.company?.name}</p>
+              </div>
+              <button onClick={() => setSelectedJob(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Type</p>
+                  <p className="font-semibold">{selectedJob.jobType?.replace('_', ' ') ?? 'Open role'}</p>
+                </div>
+                <div className="rounded-xl border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Openings</p>
+                  <p className="font-semibold">{selectedJob.openings ?? selectedJob._count?.applications ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Deadline</p>
+                  <p className="font-semibold">
+                    {selectedJob.applicationDeadline ? new Date(selectedJob.applicationDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'None'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className="font-semibold">{selectedJob.status ?? 'OPEN'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-gray-50 p-4 text-sm text-muted-foreground whitespace-pre-line max-h-56 overflow-y-auto">
+                {selectedJob.rawJdText || selectedJob.description || 'No job description available.'}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {selectedJob.jobSkills?.map((skill: any) => (
+                  <span key={skill.id} className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
+                    {skill.skill?.name ?? skill.skillId}
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-border pt-4">
+                <button
+                  onClick={() => setSelectedJob(null)}
+                  className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-muted-foreground"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => runMatchingMutation.mutate(selectedJob.id)}
+                  disabled={runMatchingMutation.isPending}
+                  className="rounded-xl bg-brand-oxford px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 inline-flex items-center gap-2"
+                >
+                  {runMatchingMutation.isPending ? <><RefreshCw className="w-4 h-4 animate-spin" /> Running...</> : <><Play className="w-4 h-4" /> Run Matching</>}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

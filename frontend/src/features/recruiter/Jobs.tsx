@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Briefcase, Plus, Users, Clock, Sparkles, ChevronDown, ChevronUp, X, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import SectionCard from '@/components/shared/SectionCard';
 import EmptyState from '@/components/shared/EmptyState';
 import SkillChip from '@/components/shared/SkillChip';
-import { MOCK_JOBS } from '@/lib/mock-data';
-import { useJobs, useCreateJob, usePreviewParseJD, type ParsedJDPreview } from '@/hooks/api';
+import { useJobs, useCreateJob, usePreviewParseJD, useMe, type ParsedJDPreview } from '@/hooks/api';
 import { cn } from '@/lib/utils';
+import { getApiError } from '@/lib/api';
 
 const STATUS_COLORS: Record<string, string> = {
   OPEN: 'bg-green-50 text-green-700 border-green-200',
@@ -20,6 +21,7 @@ function PostJobForm({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<'jd' | 'review'>('jd');
   const [jdText, setJdText] = useState('');
   const [parsed, setParsed] = useState<ParsedJDPreview | null>(null);
+  const [error, setError] = useState('');
 
   // Editable fields
   const [title, setTitle] = useState('');
@@ -34,10 +36,19 @@ function PostJobForm({ onClose }: { onClose: () => void }) {
 
   const previewParse = usePreviewParseJD();
   const createJob = useCreateJob();
+  const { data: me } = useMe();
+  const company = me?.recruiterProfile?.company;
+  const companyId = company?.id;
+  const companyName = company?.name;
+
+  useEffect(() => {
+    setError('');
+  }, [step]);
 
   const handleParse = async () => {
     if (!jdText.trim()) return;
     try {
+      setError('');
       const result = await previewParse.mutateAsync(jdText);
       const p = result.parsedData;
       setParsed(p);
@@ -59,7 +70,13 @@ function PostJobForm({ onClose }: { onClose: () => void }) {
 
   const handlePost = async () => {
     try {
+      if (!companyId) {
+        setError('No company is linked to this recruiter account. Ask admin to connect your company profile first.');
+        return;
+      }
+      setError('');
       await createJob.mutateAsync({
+        companyId,
         title,
         location,
         jobType: jobType as any,
@@ -79,8 +96,8 @@ function PostJobForm({ onClose }: { onClose: () => void }) {
         status: 'OPEN',
       } as any);
       onClose();
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(getApiError(err));
     }
   };
 
@@ -118,6 +135,18 @@ function PostJobForm({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="space-y-5">
+            {error && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                {error}
+              </div>
+            )}
+
+            {companyName && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+                Posting as <b>{companyName}</b>
+              </div>
+            )}
+
             {/* Basic fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
@@ -184,7 +213,7 @@ function PostJobForm({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 onClick={handlePost}
-                disabled={!title || createJob.isPending}
+                disabled={!title || createJob.isPending || !companyId}
                 className="flex items-center gap-2 text-xs font-semibold bg-brand-oxford text-white px-4 py-2 rounded-xl disabled:opacity-50"
               >
                 {createJob.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
@@ -243,6 +272,7 @@ function SkillTagEditor({
 
 function JobCard({ job, i }: { job: any; i: number }) {
   const [expanded, setExpanded] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <motion.div
@@ -281,8 +311,12 @@ function JobCard({ job, i }: { job: any; i: number }) {
             </span>
           )}
           <div className="ml-auto flex gap-2 items-center">
-            <button className="text-xs font-semibold text-brand-oxford hover:underline">View Matches</button>
-            <button className="text-xs font-semibold text-muted-foreground hover:text-foreground">Edit</button>
+            <button
+              onClick={() => navigate(`/recruiter/matches?jobId=${job.id}`)}
+              className="text-xs font-semibold text-brand-oxford hover:underline"
+            >
+              View Matches
+            </button>
             {(job.description || job.rawJdText) && (
               <button
                 onClick={() => setExpanded(v => !v)}
@@ -386,7 +420,7 @@ function JobCard({ job, i }: { job: any; i: number }) {
 export default function RecruiterJobs() {
   const [showNew, setShowNew] = useState(false);
   const { data: liveJobs } = useJobs();
-  const allJobs = liveJobs ?? MOCK_JOBS;
+  const allJobs = liveJobs ?? [];
 
   return (
     <div className="space-y-5">

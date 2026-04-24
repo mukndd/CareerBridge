@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig, type AxiosError } from 'axios';
 import type { ApiResponse } from '@/types';
+import { useAuthStore } from '@/stores/auth.store';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -8,6 +9,8 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
 });
+
+let isRedirectingToLogin = false;
 
 // Attach token to every request
 apiClient.interceptors.request.use((config) => {
@@ -20,12 +23,17 @@ apiClient.interceptors.request.use((config) => {
 
 // Handle 401 globally
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    isRedirectingToLogin = false;
+    return response;
+  },
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('careerbridge_token');
-      localStorage.removeItem('careerbridge_user');
-      window.location.href = '/login';
+      useAuthStore.getState().logout();
+      if (!isRedirectingToLogin && window.location.pathname !== '/login') {
+        isRedirectingToLogin = true;
+        window.location.replace('/login');
+      }
     }
     return Promise.reject(error);
   },

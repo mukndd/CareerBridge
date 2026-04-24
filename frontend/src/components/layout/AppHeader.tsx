@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, Bell, Search, Sun, Moon, LogOut, User, ChevronDown } from 'lucide-react';
+import { Menu, Bell, LogOut, User, ChevronDown } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { cn, initials } from '@/lib/utils';
@@ -12,7 +12,7 @@ interface AppHeaderProps {
 
 export default function AppHeader({ title, subtitle }: AppHeaderProps) {
   const { user, logout } = useAuthStore();
-  const { toggleSidebar, theme, toggleTheme } = useUIStore();
+  const { toggleSidebar } = useUIStore();
   const navigate = useNavigate();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -56,15 +56,6 @@ export default function AppHeader({ title, subtitle }: AppHeaderProps) {
 
       {/* Right actions */}
       <div className="flex items-center gap-1">
-        {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground"
-          title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        >
-          {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-        </button>
-
         {/* Notifications */}
         <button className="relative w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground">
           <Bell className="w-4 h-4" />

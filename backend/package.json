@@ -21,6 +21,7 @@
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.1",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",
@@ -37,10 +38,10 @@
     "ioredis": "^5.3.2",
     "mammoth": "^1.6.0",
     "multer": "^1.4.5-lts.1",
-    "openai": "^4.25.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.6.205",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.0",
@@ -69,10 +70,16 @@
     "typescript": "^5.3.3"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
-    "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }

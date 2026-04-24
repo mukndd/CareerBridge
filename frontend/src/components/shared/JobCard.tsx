@@ -12,11 +12,15 @@ interface JobCardProps {
   eligibility?: 'ELIGIBLE' | 'PARTIALLY_ELIGIBLE' | 'INELIGIBLE';
   onClick?: () => void;
   onApply?: () => void;
+  isApplied?: boolean;
+  isApplying?: boolean;
   compact?: boolean;
   className?: string;
 }
 
-export default function JobCard({ job, matchScore, eligibility, onClick, onApply, compact, className }: JobCardProps) {
+export default function JobCard({
+  job, matchScore, eligibility, onClick, onApply, isApplied = false, isApplying = false, compact, className,
+}: JobCardProps) {
   const requiredSkills = job.jobSkills?.filter(s => s.type === 'REQUIRED') ?? [];
   const hasDescription = !!(job.description || (job as any).rawJdText);
   const [showDesc, setShowDesc] = useState(false);
@@ -104,9 +108,10 @@ export default function JobCard({ job, matchScore, eligibility, onClick, onApply
         {onApply && (
           <button
             onClick={e => { e.stopPropagation(); onApply(); }}
-            className="text-xs font-semibold text-white bg-brand-oxford hover:bg-brand-oxford-600 px-3 py-1.5 rounded-lg transition-colors"
+            disabled={isApplied || isApplying}
+            className="text-xs font-semibold text-white bg-brand-oxford hover:bg-brand-oxford-600 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60"
           >
-            Apply
+            {isApplying ? 'Applying…' : isApplied ? 'Applied' : 'Apply'}
           </button>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { GraduationCap } from 'lucide-react';
+﻿import { GraduationCap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MatchResult } from '@/types';
 import MatchScoreBadge from './MatchScoreBadge';
@@ -45,7 +45,11 @@ export default function CandidateMatchCard({ match, onShortlist, onView, isShort
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground truncate">{displayName}</p>
-            <p className="text-xs text-muted-foreground">{profile?.department ?? ''} · {profile?.expectedGraduationYear}</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {match.job?.title ?? 'Matched role'}
+              {match.job?.company?.name ? ` - ${match.job.company.name}` : ''}
+            </p>
+            <p className="text-xs text-muted-foreground">{profile?.department ?? ''} - {profile?.expectedGraduationYear}</p>
           </div>
         </div>
         <MatchScoreBadge score={match.overallMatchPercentage} showBar />
@@ -108,3 +112,4 @@ export default function CandidateMatchCard({ match, onShortlist, onView, isShort
     </div>
   );
 }
+

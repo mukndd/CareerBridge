@@ -8,7 +8,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '@/lib/api';
 import type {
   StudentProfile, Job, Application, Resume, MatchResult,
-  Achievement, Project, Certification, Company, AnalyticsOverview,
+  Achievement, Project, Certification, Company, AnalyticsOverview, Shortlist,
+  ResumeUploadResponse, ProjectReviewResult, CertificationReviewResult,
 } from '@/types';
 
 // ─── Query Keys ────────────────────────────────────────────────────────────────
@@ -38,7 +39,14 @@ const STALE_5M = 5 * 60_000;
 export function useMe() {
   return useQuery({
     queryKey: QK.me,
-    queryFn: () => apiGet<{ id: string; email: string; role: string }>('/auth/me'),
+    queryFn: () => apiGet<{
+      id: string;
+      email: string;
+      role: string;
+      recruiterProfile?: { company?: { id: string; name: string } };
+      studentProfile?: { id: string; firstName: string; lastName: string };
+      adminProfile?: { id: string; firstName: string; lastName: string };
+    }>('/auth/me'),
     staleTime: STALE_5M,
     retry: 1,
   });
@@ -122,6 +130,12 @@ export function useAddProject() {
   });
 }
 
+export function useReviewProject() {
+  return useMutation({
+    mutationFn: (data: Partial<Project>) => apiPost<ProjectReviewResult>('/students/me/projects/review', data),
+  });
+}
+
 export function useUpdateProject() {
   const qc = useQueryClient();
   return useMutation({
@@ -145,6 +159,12 @@ export function useAddCertification() {
   return useMutation({
     mutationFn: (data: Partial<Certification>) => apiPost<Certification>('/students/me/certifications', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: QK.studentProfile }),
+  });
+}
+
+export function useReviewCertification() {
+  return useMutation({
+    mutationFn: (data: Partial<Certification>) => apiPost<CertificationReviewResult>('/students/me/certifications/review', data),
   });
 }
 
@@ -181,7 +201,7 @@ export function useUploadResume() {
     mutationFn: (file: File) => {
       const form = new FormData();
       form.append('file', file);
-      return apiPost<Resume>('/students/me/resume/upload', form, {
+      return apiPost<ResumeUploadResponse>('/students/me/resume/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
     },
@@ -247,7 +267,7 @@ export function useJobMatches(jobId: string) {
 export function useJobShortlist(jobId: string) {
   return useQuery({
     queryKey: QK.jobShortlist(jobId),
-    queryFn: () => apiGet<MatchResult[]>(`/jobs/${jobId}/shortlist`),
+    queryFn: () => apiGet<Shortlist[]>(`/jobs/${jobId}/shortlist`),
     enabled: !!jobId,
     staleTime: STALE_1M,
     retry: 1,

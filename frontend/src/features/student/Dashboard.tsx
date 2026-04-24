@@ -5,14 +5,9 @@ import { useAuthStore } from '@/stores/auth.store';
 import StatCard from '@/components/shared/StatCard';
 import SectionCard from '@/components/shared/SectionCard';
 import AIInsightCard from '@/components/shared/AIInsightCard';
-import MatchScoreBadge from '@/components/shared/MatchScoreBadge';
-import EligibilityBadge from '@/components/shared/EligibilityBadge';
 import ProfileCompletionCard from '@/components/shared/ProfileCompletionCard';
 import SkillChip from '@/components/shared/SkillChip';
 import { useStudentProfile, useStudentApplications, useJobs } from '@/hooks/api';
-import {
-  MOCK_MATCH_RESULTS, MOCK_STUDENT, MOCK_APPLICATIONS,
-} from '@/lib/mock-data';
 
 const COMPLETION_STEPS = [
   { label: 'Basic profile', done: true },
@@ -43,10 +38,9 @@ export default function StudentDashboard() {
   const { data: applications } = useStudentApplications();
   const { data: jobs } = useJobs({ status: 'OPEN' });
 
-  // Use real data with mock fallback
-  const liveProfile = profile ?? MOCK_STUDENT;
-  const liveApplications = applications ?? MOCK_APPLICATIONS;
-  const topMatches = MOCK_MATCH_RESULTS.slice(0, 3); // matches come from matching engine per-job
+  const liveProfile = profile;
+  const liveApplications = applications ?? [];
+  const topMatches = [];
 
   const completionSteps = profile ? [
     { label: 'Basic profile', done: true },
@@ -72,7 +66,7 @@ export default function StudentDashboard() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { title: 'Open Jobs', value: jobs ? String(jobs.length) : '12', trend: { value: 3, positive: true }, icon: Briefcase, color: 'text-brand-oxford' as const },
+          { title: 'Open Jobs', value: String(jobs?.length ?? 0), trend: { value: 3, positive: true }, icon: Briefcase, color: 'text-brand-oxford' as const },
           { title: 'Applications', value: String(liveApplications.length), trend: { value: 1, positive: true }, icon: FileText, color: 'text-blue-600' as const },
           { title: 'Top Match Score', value: '92%', trend: { value: 5, positive: true }, icon: Star, color: 'text-amber-500' as const },
           { title: 'Profile Views', value: '24', trend: { value: 8, positive: true }, icon: TrendingUp, color: 'text-green-600' as const },
@@ -89,37 +83,17 @@ export default function StudentDashboard() {
           {/* Top Matches */}
           <SectionCard
             title="Top Job Matches"
-            subtitle="Based on your skills and profile"
+            subtitle="Run matching from an admin account to populate this section"
             icon={Star}
             action={
               <Link to="/student/jobs" className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
-                View all <ChevronRight className="w-3.5 h-3.5" />
+                View jobs <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             }
           >
-            <div className="space-y-3">
-              {topMatches.map((match, i) => (
-                <motion.div
-                  key={match.id}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2 + i * 0.08 }}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-gray-50/80 hover:bg-brand-oxford/4 transition-colors cursor-pointer"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-brand-oxford/8 flex items-center justify-center flex-shrink-0">
-                    <Briefcase className="w-4 h-4 text-brand-oxford" strokeWidth={1.75} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-foreground truncate">{match.job?.title ?? 'Software Engineer'}</p>
-                    <p className="text-xs text-muted-foreground">{match.job?.company?.name}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <EligibilityBadge status={match.eligibilityStatus as any} />
-                    <MatchScoreBadge score={match.overallMatchPercentage} size="sm" />
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            {topMatches.length === 0 ? (
+              <div className="text-sm text-muted-foreground py-3">No live match results yet.</div>
+            ) : null}
           </SectionCard>
 
           {/* Applications */}
@@ -168,7 +142,7 @@ export default function StudentDashboard() {
           {/* Skills snapshot */}
           <SectionCard title="Your Top Skills" icon={TrendingUp}>
             <div className="flex flex-wrap gap-2">
-              {liveProfile.studentSkills?.slice(0, 10).map((s, i) => (
+              {liveProfile?.studentSkills?.slice(0, 10).map((s, i) => (
                 <SkillChip key={i} name={s.skill?.name ?? s.skillId} confidence={s.confidence} />
               ))}
             </div>
@@ -217,22 +191,11 @@ export default function StudentDashboard() {
                     </div>
                   );
                 })}
-              {/* Static fallback if no jobs with deadlines */}
-              {(!jobs || jobs.filter(j => j.applicationDeadline).length === 0) && [
-                { company: 'Wipro Technologies', role: 'SDE', days: 3 },
-                { company: 'TCS Digital', role: 'Full Stack', days: 7 },
-                { company: 'Infosys', role: 'Systems Engineer', days: 12 },
-              ].map((d, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">{d.company}</p>
-                    <p className="text-[11px] text-muted-foreground">{d.role}</p>
-                  </div>
-                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${d.days <= 3 ? 'bg-red-50 text-red-600' : d.days <= 7 ? 'bg-amber-50 text-amber-600' : 'bg-gray-100 text-gray-600'}`}>
-                    {d.days}d left
-                  </span>
+              {(!jobs || jobs.filter(j => j.applicationDeadline).length === 0) && (
+                <div className="text-sm text-muted-foreground py-3">
+                  No upcoming deadlines yet.
                 </div>
-              ))}
+              )}
             </div>
           </SectionCard>
         </div>

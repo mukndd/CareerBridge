@@ -7,8 +7,6 @@ import { Link } from 'react-router-dom';
 import StatCard from '@/components/shared/StatCard';
 import SectionCard from '@/components/shared/SectionCard';
 import AIInsightCard from '@/components/shared/AIInsightCard';
-import MatchScoreBadge from '@/components/shared/MatchScoreBadge';
-import { MOCK_ANALYTICS, MOCK_COMPANIES, MOCK_MATCH_RESULTS } from '@/lib/mock-data';
 import { useAdminAnalytics, useAdminCompanies } from '@/hooks/api';
 
 const AI_INSIGHTS = [
@@ -29,8 +27,33 @@ export default function AdminDashboard() {
   const { data: liveAnalytics } = useAdminAnalytics();
   const { data: liveCompanies } = useAdminCompanies();
 
-  const analytics = liveAnalytics ?? MOCK_ANALYTICS;
-  const companies = liveCompanies ?? MOCK_COMPANIES;
+  const analytics = liveAnalytics ?? {
+    overview: {
+      totalStudents: 0,
+      totalJobs: 0,
+      openJobs: 0,
+      totalCompanies: 0,
+      totalApplications: 0,
+      recentApplications: 0,
+      totalMatches: 0,
+    },
+    shortlistBreakdown: {
+      HIGHLY_RECOMMENDED: 0,
+      RECOMMENDED: 0,
+      BORDERLINE: 0,
+      NOT_RECOMMENDED: 0,
+    },
+    applicationStatusBreakdown: {
+      APPLIED: 0,
+      UNDER_REVIEW: 0,
+      SHORTLISTED: 0,
+      INTERVIEW_SCHEDULED: 0,
+      SELECTED: 0,
+      REJECTED: 0,
+      WITHDRAWN: 0,
+    },
+  };
+  const companies = liveCompanies ?? [];
 
   return (
     <div className="space-y-6">
@@ -87,7 +110,7 @@ export default function AdminDashboard() {
           {/* Top matches */}
           <SectionCard
             title="Recent Match Results"
-            subtitle="Latest AI matching computations"
+            subtitle="Run matching from the AI Matching page to populate this section"
             icon={Target}
             action={
               <Link to="/admin/matching" className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
@@ -95,26 +118,7 @@ export default function AdminDashboard() {
               </Link>
             }
           >
-            <div className="space-y-2.5">
-              {MOCK_MATCH_RESULTS.slice(0, 5).map((m, i) => (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + i * 0.07 }}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-gray-50/80 hover:bg-brand-oxford/4 transition-colors"
-                >
-                  <div className="w-7 h-7 rounded-full bg-brand-oxford/10 flex items-center justify-center flex-shrink-0">
-                    <span className="text-xs font-bold text-brand-oxford">{m.studentProfile?.firstName?.charAt(0) ?? 'S'}</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-foreground truncate">{m.studentProfile ? `${m.studentProfile.firstName} ${m.studentProfile.lastName}` : 'Student'}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">{m.job?.title} · {m.job?.company?.name}</p>
-                  </div>
-                  <MatchScoreBadge score={m.overallMatchPercentage} size="sm" />
-                </motion.div>
-              ))}
-            </div>
+            <div className="text-sm text-muted-foreground py-3">No live match results yet.</div>
           </SectionCard>
 
           {/* Company overview */}

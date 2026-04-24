@@ -42,6 +42,7 @@ export interface StudentProfile {
   yearOfAdmission?: number;
   expectedGraduationYear?: number;
   cgpa?: number;
+  gpaScale?: number;
   activeBacklogs: number;
   totalBacklogs: number;
   tenthPercentage?: number;
@@ -192,6 +193,51 @@ export interface Resume {
   updatedAt: string;
 }
 
+export interface ParsedResumeContent {
+  summary?: string;
+  contactInfo?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    linkedin?: string;
+    github?: string;
+    portfolio?: string;
+  };
+  education?: Array<{
+    institution: string;
+    degree: string;
+    field?: string;
+    cgpa?: number;
+    year?: number;
+  }>;
+  experience?: Array<{
+    company: string;
+    role: string;
+    duration?: string;
+    description: string;
+    bullets?: string[];
+  }>;
+  projects?: Array<{
+    title: string;
+    description: string;
+    techStack?: string[];
+    bullets?: string[];
+  }>;
+  skills?: string[];
+  certifications?: Array<{
+    name: string;
+    issuer?: string;
+    year?: number;
+  }>;
+  achievements?: string[];
+}
+
+export interface ResumeUploadResponse {
+  resume: Resume;
+  parsedContent: ParsedResumeContent;
+  message: string;
+}
+
 // ─────────────────────────────────────────────
 // COMPANIES & JOBS
 // ─────────────────────────────────────────────
@@ -298,6 +344,27 @@ export interface FuzzySkillMatch {
   hops?: number;      // 0=exact, 1=direct, 2=2-hop transitive, 3=3-hop transitive
 }
 
+export interface FairnessAudit {
+  rawScore: number;
+  boostedScore: number;
+  yMaxGpa: number;
+  gpaImpactAbs: number;
+  gpaImpactRel: number;
+  classification: 'fair' | 'minor_impact' | 'significant_impact';
+}
+
+export interface ScoreExplanation {
+  summary: string;
+  reasonCodes: string[];
+  highlights: string[];
+  warnings: string[];
+  featureBreakdown: Array<{ key: string; label: string; value: number; weight: number }>;
+  evidenceGraph?: {
+    nodes: Array<{ id: string; type: string; label: string }>;
+    edges: Array<{ from: string; to: string; relation: string }>;
+  };
+}
+
 export type WeightProfile = 'TECH_HEAVY' | 'DATA_SCIENCE' | 'ACADEMIC' | 'BALANCED';
 
 export interface MatchResult {
@@ -308,6 +375,13 @@ export interface MatchResult {
   job?: Pick<Job, 'id' | 'title' | 'company'>;
   eligibilityStatus: EligibilityStatus;
   eligibilityReasons: string[];
+  rawScore?: number;
+  overlap?: number;
+  treScore?: number;
+  boost?: number;
+  gpaOn4?: number;
+  rawGpa?: number;
+  rawGpaScale?: number;
   overallMatchPercentage: number;
   requiredSkillCoverage: number;
   preferredSkillCoverage: number;
@@ -315,6 +389,8 @@ export interface MatchResult {
   academicFit: number;
   projectRelevance: number;
   certificationRelevance: number;
+  fairnessAudit?: FairnessAudit;
+  scoreExplanation?: ScoreExplanation;
   matchedSkills: MatchedSkillInfo[];
   inferredMatchedSkills: MatchedSkillInfo[];
   missingSkills: string[];
@@ -340,7 +416,43 @@ export interface Shortlist {
   jobId: string;
   status: ShortlistStatus;
   adminNotes?: string;
+  application?: {
+    id: string;
+    studentProfile?: Pick<StudentProfile, 'id' | 'firstName' | 'lastName' | 'department' | 'cgpa' | 'expectedGraduationYear'>;
+  };
   createdAt: string;
+}
+
+export interface ProjectReviewResult {
+  verdict: 'likely_authentic' | 'needs_review' | 'insufficient_evidence';
+  score: number;
+  summary: string;
+  reasons: string[];
+  warnings: string[];
+  evidence?: {
+    repo?: string;
+    readmeFound?: boolean;
+    stars?: number;
+    language?: string;
+    updatedAt?: string;
+    readmeOverlap?: number;
+  };
+}
+
+export interface CertificationReviewResult {
+  verdict: 'verified' | 'needs_review' | 'rejected';
+  score: number;
+  summary: string;
+  reasons: string[];
+  warnings: string[];
+  evidence?: {
+    issuerTrusted?: boolean;
+    credentialUrlTrusted?: boolean;
+    issuerHost?: string;
+    hasCredentialId?: boolean;
+    issueDateProvided?: boolean;
+    expiryDateProvided?: boolean;
+  };
 }
 
 // ─────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OpenAIProvider } from './providers/openai.provider';
+import { AnthropicProvider } from './providers/openai.provider';
 import {
   IAIProvider,
   ParsedResumeContent,
@@ -30,8 +30,7 @@ export class AiService implements IAIProvider {
   private readonly logger = new Logger('AiService');
 
   constructor(private readonly configService: ConfigService) {
-    // Future: swap provider based on config
-    this.provider = new OpenAIProvider(configService);
+    this.provider = new AnthropicProvider(configService);
   }
 
   async parseResume(rawText: string): Promise<ParsedResumeContent> {

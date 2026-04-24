@@ -1,45 +1,62 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Search, SlidersHorizontal, Briefcase } from 'lucide-react';
+import { Search, SlidersHorizontal, Briefcase, X, MapPin, Clock, Users, ChevronDown } from 'lucide-react';
 import JobCard from '@/components/shared/JobCard';
 import EmptyState from '@/components/shared/EmptyState';
-import { MOCK_JOBS, MOCK_MATCH_RESULTS } from '@/lib/mock-data';
-import { useJobs, useApplyToJob } from '@/hooks/api';
+import { useJobs, useApplyToJob, useStudentApplications, useStudentProfile } from '@/hooks/api';
 import { cn } from '@/lib/utils';
+import type { Job, EligibilityStatus } from '@/types';
 
 const FILTERS = ['All', 'High Match', 'Eligible', 'New', 'Internship', 'Full Time'];
 
 export default function StudentJobs() {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
 
   const { data: liveJobs } = useJobs({ status: 'OPEN' });
+  const { data: profile } = useStudentProfile();
+  const { data: applications } = useStudentApplications();
   const applyMutation = useApplyToJob();
 
-  const allJobs = liveJobs ?? MOCK_JOBS;
+  const allJobs = liveJobs ?? [];
+  const appliedJobIds = useMemo(() => new Set((applications ?? []).map(app => app.jobId)), [applications]);
+  const studentSkillNames = useMemo(() => new Set((profile?.studentSkills ?? []).map(s => s.skill?.name).filter(Boolean)), [profile]);
 
   const jobsWithMatch = allJobs.map(job => {
-    const match = MOCK_MATCH_RESULTS.find(m => m.jobId === job.id);
-    return { job, matchScore: match?.overallMatchPercentage, eligibility: match?.eligibilityStatus };
+    const required = job.jobSkills?.filter(s => s.type === 'REQUIRED') ?? [];
+    const matched = required.filter(s => studentSkillNames.has(s.skill?.name ?? s.skillId));
+    const matchScore = required.length > 0 ? Math.round((matched.length / required.length) * 100) : undefined;
+    const cgpa = profile?.cgpa ?? 0;
+    const backlogs = profile?.activeBacklogs ?? 0;
+    const eligibility: EligibilityStatus = (job.minCgpa != null && cgpa < job.minCgpa) || (job.maxBacklogs != null && backlogs > job.maxBacklogs)
+      ? 'INELIGIBLE'
+      : job.eligibleBranches?.length && profile?.department && !job.eligibleBranches.includes(profile.department)
+        ? 'PARTIALLY_ELIGIBLE'
+        : 'ELIGIBLE';
+    return { job, matchScore, eligibility };
   });
 
-  const filtered = jobsWithMatch.filter(({ job }) => {
-    const q = search.toLowerCase();
-    const matchesSearch = job.title?.toLowerCase().includes(q) || job.company?.name?.toLowerCase().includes(q);
-    if (!matchesSearch) return false;
-    if (activeFilter === 'Internship') return job.jobType === 'INTERNSHIP';
-    if (activeFilter === 'Full Time') return job.jobType === 'FULL_TIME';
-    if (activeFilter === 'High Match') return (MOCK_MATCH_RESULTS.find(m => m.jobId === job.id)?.overallMatchPercentage ?? 0) >= 75;
-    if (activeFilter === 'Eligible') return MOCK_MATCH_RESULTS.find(m => m.jobId === job.id)?.eligibilityStatus === 'ELIGIBLE';
-    return true;
-  });
+  const filtered = jobsWithMatch
+    .filter(({ job, matchScore, eligibility }) => {
+      const q = search.toLowerCase();
+      const matchesSearch = job.title?.toLowerCase().includes(q) || job.company?.name?.toLowerCase().includes(q);
+      if (!matchesSearch) return false;
+      if (activeFilter === 'Internship') return job.jobType === 'INTERNSHIP';
+      if (activeFilter === 'Full Time') return job.jobType === 'FULL_TIME';
+      if (activeFilter === 'High Match') return (matchScore ?? 0) >= 75;
+      if (activeFilter === 'Eligible') return eligibility === 'ELIGIBLE';
+      return true;
+    })
+    .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-black text-brand-oxford">Job Opportunities</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          {allJobs.length} open positions · Sorted by match score
+          {allJobs.length} open positions · Ranked from your current profile
         </p>
       </div>
 
@@ -93,11 +110,109 @@ export default function StudentJobs() {
                 job={job}
                 matchScore={matchScore}
                 eligibility={eligibility}
-                onApply={() => applyMutation.mutate(job.id)}
-                onClick={() => {}}
+                isApplied={appliedJobIds.has(job.id)}
+                isApplying={pendingJobId === job.id}
+                onApply={() => {
+                  if (appliedJobIds.has(job.id)) return;
+                  setPendingJobId(job.id);
+                  applyMutation.mutate(job.id, {
+                    onSuccess: () => setSelectedJob(job),
+                    onSettled: () => setPendingJobId(null),
+                  });
+                }}
+                onClick={() => setSelectedJob(job)}
               />
             </motion.div>
           ))}
+        </div>
+      )}
+
+      {selectedJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/45" onClick={() => setSelectedJob(null)} />
+          <div className="relative w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+              <div>
+                <p className="text-sm font-black text-brand-oxford">{selectedJob.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{selectedJob.company?.name}</p>
+              </div>
+              <button onClick={() => setSelectedJob(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-6 space-y-5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div className="rounded-xl border border-border p-3">
+                  <MapPin className="w-4 h-4 text-brand-oxford" />
+                  <p className="mt-2 text-xs text-muted-foreground">Location</p>
+                  <p className="font-semibold">{selectedJob.location ?? 'Remote / flexible'}</p>
+                </div>
+                <div className="rounded-xl border border-border p-3">
+                  <Clock className="w-4 h-4 text-brand-oxford" />
+                  <p className="mt-2 text-xs text-muted-foreground">Type</p>
+                  <p className="font-semibold">{selectedJob.jobType.replace('_', ' ')}</p>
+                </div>
+                <div className="rounded-xl border border-border p-3">
+                  <Users className="w-4 h-4 text-brand-oxford" />
+                  <p className="mt-2 text-xs text-muted-foreground">Applicants</p>
+                  <p className="font-semibold">{selectedJob._count?.applications ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-border p-3">
+                  <ChevronDown className="w-4 h-4 text-brand-oxford" />
+                  <p className="mt-2 text-xs text-muted-foreground">Package</p>
+                  <p className="font-semibold">{selectedJob.ctcMin != null && selectedJob.ctcMax != null ? `₹${selectedJob.ctcMin}–${selectedJob.ctcMax} LPA` : '—'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-gray-50 p-4 text-sm leading-relaxed whitespace-pre-line text-muted-foreground max-h-72 overflow-y-auto">
+                {selectedJob.rawJdText || selectedJob.description}
+              </div>
+
+              {selectedJob.responsibilities?.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">Responsibilities</p>
+                  <ul className="space-y-1.5 text-sm text-muted-foreground">
+                    {selectedJob.responsibilities.map((item, index) => (
+                      <li key={index} className="flex gap-2">
+                        <span className="mt-2 h-1.5 w-1.5 rounded-full bg-brand-oxford flex-shrink-0" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {selectedJob.jobSkills?.map((skill) => (
+                  <span key={skill.id} className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
+                    {skill.skill?.name ?? skill.skillId}
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-border pt-4">
+                <button
+                  onClick={() => setSelectedJob(null)}
+                  className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-muted-foreground"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    if (appliedJobIds.has(selectedJob.id)) return;
+                    setPendingJobId(selectedJob.id);
+                    applyMutation.mutate(selectedJob.id, {
+                      onSettled: () => setPendingJobId(null),
+                    });
+                  }}
+                  disabled={appliedJobIds.has(selectedJob.id)}
+                  className="rounded-xl bg-brand-oxford px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {appliedJobIds.has(selectedJob.id) ? 'Applied' : 'Apply to this job'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

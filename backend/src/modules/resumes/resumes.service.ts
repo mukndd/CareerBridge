@@ -8,6 +8,7 @@ import {
 import { ResumeType, ResumeStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
+import type { ParsedResumeContent } from '../ai/interfaces/ai-provider.interface';
 import { FilesService } from '../files/files.service';
 import { SkillsService } from '../skills/skills.service';
 import { StudentsService } from '../students/students.service';
@@ -32,16 +33,40 @@ export class ResumesService {
     // Save file
     const savedFile = await this.filesService.saveFile(file, 'RESUME', userId);
 
-    // Extract raw text
-    const rawText = await this.filesService.extractTextFromFile(savedFile.id);
+    // Extract raw text with confidence/warnings
+    const extraction = await this.filesService.extractDocumentFromFile(savedFile.id);
+    const rawText = extraction.text;
 
     if (!rawText || rawText.trim().length < 100) {
       throw new BadRequestException('Could not extract readable text from resume file');
     }
+    if (extraction.needsManualReview) {
+      this.logger.warn(`Resume extraction for ${savedFile.id} needs review: ${extraction.warnings.join('; ')}`);
+    }
 
-    // AI parse
-    this.logger.log(`Parsing uploaded resume for student ${profile.id}`);
-    const parsed = await this.aiService.parseResume(rawText);
+    // Skill extraction must never depend on the AI parser or OpenAI availability.
+    // We keep the AI parse as an enhancement, but the upload should still complete
+    // with deterministic skill extraction when no API key is configured.
+    const skillExtraction = await this.skillsService.extractAndUpsertStudentSkills(
+      profile.id,
+      rawText,
+      `resume:${savedFile.id}`,
+      'Resume upload',
+    );
+
+    this.logger.log(`Extracted ${skillExtraction.skills.length} skills from uploaded resume`);
+
+    let parsed: ParsedResumeContent = { skills: [] };
+    try {
+      this.logger.log(`Parsing uploaded resume for student ${profile.id}`);
+      parsed = await this.aiService.parseResume(rawText);
+    } catch (error) {
+      this.logger.warn(
+        `AI resume parser unavailable for ${savedFile.id}; falling back to extracted skills only: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
 
     // Create resume record
     const resume = await this.prisma.resume.create({
@@ -51,32 +76,50 @@ export class ResumesService {
         status: ResumeStatus.ACTIVE,
         title: file.originalname.replace(/\.[^/.]+$/, '') || 'Uploaded Resume',
         extractedText: rawText,
-        structuredContent: parsed as any,
+        structuredContent: {
+          ...(parsed as any),
+          extraction: {
+            confidence: extraction.confidence,
+            warnings: extraction.warnings,
+            sourceType: extraction.sourceType,
+          },
+        } as any,
         fileId: savedFile.id,
       },
     });
 
-    // Extract skills asynchronously
-    this.skillsService
-      .extractAndUpsertStudentSkills(
-        profile.id,
-        rawText,
-        `resume:${resume.id}`,
-        'Resume upload',
-      )
-      .then((result) => {
-        this.logger.log(`Extracted ${result.skills.length} skills from uploaded resume`);
-        // Update resume with extracted skills
-        return this.prisma.resume.update({
-          where: { id: resume.id },
-          data: { extractedSkills: result.rawExtracted as any },
-        });
-      })
-      .catch((err) => this.logger.warn('Resume skill extraction failed:', err.message));
+    const extractedSkillNames = [...new Set(skillExtraction.skills.map((skill) => skill.name))];
+    const parsedSkills = Array.isArray((parsed as any)?.skills) ? (parsed as any).skills : [];
+    const mergedSkills = [...new Set([...parsedSkills, ...extractedSkillNames])];
+
+    const mergedStructuredContent = {
+      ...(parsed as any),
+      skills: mergedSkills,
+      extraction: {
+        confidence: extraction.confidence,
+        warnings: extraction.warnings,
+        sourceType: extraction.sourceType,
+      },
+      skillExtraction: {
+        skills: skillExtraction.skills,
+        rawExtracted: skillExtraction.rawExtracted,
+      },
+    };
+
+    const updatedResume = await this.prisma.resume.update({
+      where: { id: resume.id },
+      data: {
+        structuredContent: mergedStructuredContent as any,
+        extractedSkills: skillExtraction.rawExtracted as any,
+      },
+    });
 
     return {
-      resume,
-      parsedContent: parsed,
+      resume: updatedResume,
+      parsedContent: {
+        ...(parsed as any),
+        skills: mergedSkills,
+      },
       message: 'Resume uploaded and parsed successfully',
     };
   }

@@ -20,12 +20,9 @@ export default registerAs('app', () => ({
     db: parseInt(process.env.REDIS_DB || '0', 10),
   },
 
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY || '',
-    model: process.env.OPENAI_MODEL || 'gpt-4o',
-    embeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
-    maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '4096', 10),
-    temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.3'),
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
   },
 
   storage: {

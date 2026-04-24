@@ -9,9 +9,9 @@ import { FileCategory } from '@prisma/client';
 import * as path from 'path';
 import * as fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import * as pdfParse from 'pdf-parse';
-import * as mammoth from 'mammoth';
 import { PrismaService } from '../../prisma/prisma.service';
+import { DocumentExtractionService } from './document-extraction.service';
+import { ExtractionResult } from './document-extraction.util';
 
 export interface StoredFile {
   id: string;
@@ -34,6 +34,7 @@ export class FilesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly documentExtractionService: DocumentExtractionService,
   ) {
     this.uploadPath = this.configService.get<string>('app.storage.localUploadPath', './uploads');
     this.maxFileSizeBytes =
@@ -131,19 +132,17 @@ export class FilesService {
   }
 
   // Extract raw text from PDF or DOCX
-  async extractTextFromFile(fileId: string): Promise<string> {
+  async extractDocumentFromFile(fileId: string): Promise<ExtractionResult> {
     const { record, absolutePath } = await this.getFile(fileId);
-    const ext = path.extname(record.originalName).toLowerCase();
+    return this.documentExtractionService.extractFromFile(absolutePath, record.originalName);
+  }
 
-    if (ext === '.pdf') {
-      const buffer = fs.readFileSync(absolutePath);
-      const data = await pdfParse(buffer);
-      return data.text;
-    } else if (ext === '.docx' || ext === '.doc') {
-      const result = await mammoth.extractRawText({ path: absolutePath });
-      return result.value;
+  async extractTextFromFile(fileId: string): Promise<string> {
+    const extraction = await this.extractDocumentFromFile(fileId);
+    if (!extraction.text) {
+      throw new BadRequestException('Could not extract readable text from this file');
     }
-    throw new BadRequestException(`Cannot extract text from ${ext} files`);
+    return extraction.text;
   }
 
   getPublicUrl(filePath: string): string {

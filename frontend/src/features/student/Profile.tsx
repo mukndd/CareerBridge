@@ -3,10 +3,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { motion } from 'framer-motion';
-import { User, GraduationCap, Linkedin, Github, Globe, Plus, X, Edit2, Save } from 'lucide-react';
+import { User, GraduationCap, Linkedin, Github, Globe, X, Edit2, Save } from 'lucide-react';
 import SectionCard from '@/components/shared/SectionCard';
 import SkillChip from '@/components/shared/SkillChip';
-import { MOCK_STUDENT, MOCK_ACHIEVEMENTS, MOCK_PROJECTS, MOCK_CERTIFICATIONS } from '@/lib/mock-data';
+import { MOCK_STUDENT } from '@/lib/mock-data';
 import { useStudentProfile, useUpdateStudentProfile } from '@/hooks/api';
 import { cn } from '@/lib/utils';
 
@@ -39,8 +39,8 @@ export default function StudentProfile() {
   const updateMutation = useUpdateStudentProfile();
 
   const student = profile ?? MOCK_STUDENT;
-  const projects = (student as any).projects ?? MOCK_PROJECTS;
-  const certifications = (student as any).certifications ?? MOCK_CERTIFICATIONS;
+  const projects = (student as any).projects ?? [];
+  const certifications = (student as any).certifications ?? [];
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -172,14 +172,7 @@ export default function StudentProfile() {
       </SectionCard>
 
       {/* Skills */}
-      <SectionCard
-        title="Skills"
-        action={
-          <button className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
-            <Plus className="w-3.5 h-3.5" /> Add Skill
-          </button>
-        }
-      >
+      <SectionCard title="Skills">
         <div className="flex flex-wrap gap-2">
           {student.studentSkills?.map((s, i) => (
             <div key={i} className="relative group">
@@ -195,14 +188,7 @@ export default function StudentProfile() {
       </SectionCard>
 
       {/* Projects */}
-      <SectionCard
-        title="Projects"
-        action={
-          <button className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
-            <Plus className="w-3.5 h-3.5" /> Add Project
-          </button>
-        }
-      >
+      <SectionCard title="Projects">
         <div className="space-y-4">
           {projects.map((p: any, i: number) => (
             <motion.div key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.06 }} className="p-4 rounded-xl bg-gray-50/80 border border-border">
@@ -226,14 +212,7 @@ export default function StudentProfile() {
       </SectionCard>
 
       {/* Certifications */}
-      <SectionCard
-        title="Certifications"
-        action={
-          <button className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
-            <Plus className="w-3.5 h-3.5" /> Add Certification
-          </button>
-        }
-      >
+      <SectionCard title="Certifications">
         <div className="space-y-3">
           {certifications.map((c: any, i: number) => (
             <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-gray-50/80 border border-border">

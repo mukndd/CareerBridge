@@ -8,6 +8,7 @@ import {
 } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { StudentsService } from './students.service';
+import type { ProjectReviewResult, CertificationReviewResult } from './students.service';
 import { UpdateStudentProfileDto } from './dto/update-profile.dto';
 import { CreateAchievementDto, UpdateAchievementDto } from './dto/achievement.dto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
@@ -84,6 +85,12 @@ export class StudentsController {
     return this.studentsService.createProject(user.sub, dto);
   }
 
+  @Post('me/projects/review')
+  @ApiOperation({ summary: 'Review a project draft before saving' })
+  reviewProject(@Body() dto: CreateProjectDto): Promise<ProjectReviewResult> {
+    return this.studentsService.reviewProject(dto);
+  }
+
   @Put('me/projects/:id')
   @ApiOperation({ summary: 'Update a project' })
   updateProject(
@@ -113,6 +120,12 @@ export class StudentsController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.studentsService.createCertification(user.sub, dto, file);
+  }
+
+  @Post('me/certifications/review')
+  @ApiOperation({ summary: 'Review a certification draft before saving' })
+  reviewCertification(@Body() dto: CreateCertificationDto): Promise<CertificationReviewResult> {
+    return this.studentsService.reviewCertification(dto);
   }
 
   @Put('me/certifications/:id')

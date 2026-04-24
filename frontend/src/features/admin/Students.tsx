@@ -4,26 +4,19 @@ import { Search, Users, GraduationCap, ChevronRight, Filter } from 'lucide-react
 import EligibilityBadge from '@/components/shared/EligibilityBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import SkillChip from '@/components/shared/SkillChip';
+import StudentInsightModal from '@/components/shared/StudentInsightModal';
 import { useAdminStudents } from '@/hooks/api';
 import { cn } from '@/lib/utils';
-
-// Demo fallback
-const MOCK_STUDENTS = [
-  { id: '1', firstName: 'Arjun', lastName: 'Sharma', email: 'arjun@dsu.edu.in', department: 'CSE', semester: 7, cgpa: 8.45, activeBacklogs: 0, studentSkills: [{ skill: { name: 'Python' } }, { skill: { name: 'React' } }] },
-  { id: '2', firstName: 'Priya', lastName: 'Nair', email: 'priya@dsu.edu.in', department: 'AI & DS', semester: 7, cgpa: 9.1, activeBacklogs: 0, studentSkills: [{ skill: { name: 'TensorFlow' } }, { skill: { name: 'Python' } }] },
-  { id: '3', firstName: 'Rahul', lastName: 'Patel', email: 'rahul@dsu.edu.in', department: 'CSE', semester: 7, cgpa: 6.8, activeBacklogs: 1, studentSkills: [{ skill: { name: 'Java' } }] },
-  { id: '4', firstName: 'Sneha', lastName: 'Rao', email: 'sneha@dsu.edu.in', department: 'IT', semester: 7, cgpa: 8.9, activeBacklogs: 0, studentSkills: [{ skill: { name: 'React' } }, { skill: { name: 'Node.js' } }] },
-  { id: '5', firstName: 'Kiran', lastName: 'Mehta', email: 'kiran@dsu.edu.in', department: 'CSE', semester: 7, cgpa: 5.9, activeBacklogs: 2, studentSkills: [{ skill: { name: 'C++' } }] },
-];
 
 const TABS = ['All', 'Eligible', 'Partially Eligible', 'Not Eligible'];
 
 export default function AdminStudents() {
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState('All');
+  const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
 
   const { data: liveStudents } = useAdminStudents();
-  const students: any[] = liveStudents ?? MOCK_STUDENTS;
+  const students: any[] = liveStudents ?? [];
 
   const filtered = students.filter((s: any) => {
     const name = `${s.firstName ?? ''} ${s.lastName ?? ''}`.toLowerCase();
@@ -155,7 +148,10 @@ export default function AdminStudents() {
                       <span className="text-sm font-semibold text-foreground">{s._count?.applications ?? 0}</span>
                     </td>
                     <td className="px-4 py-3 pr-5">
-                      <button className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline">
+                      <button
+                        onClick={() => setSelectedStudent(s)}
+                        className="text-xs font-semibold text-brand-oxford flex items-center gap-1 hover:underline"
+                      >
                         View <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </td>
@@ -166,6 +162,14 @@ export default function AdminStudents() {
           </div>
         </div>
       )}
+
+      <StudentInsightModal
+        open={Boolean(selectedStudent)}
+        onClose={() => setSelectedStudent(null)}
+        student={selectedStudent ?? {}}
+        title="Student details"
+        subtitle="Why this profile is eligible, partial, or not eligible"
+      />
     </div>
   );
 }

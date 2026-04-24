@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { SkillsService } from '../skills/skills.service';
 import { FilesService } from '../files/files.service';
+import { MatchingService } from '../matching/matching.service';
 import { SkillCategory } from '@prisma/client';
 import { CreateJobDto, UpdateJobDto } from './dto/job.dto';
 import { PaginationDto, paginate } from '../../shared/dto/pagination.dto';
@@ -20,6 +21,7 @@ export class JobsService {
     private readonly aiService: AiService,
     private readonly skillsService: SkillsService,
     private readonly filesService: FilesService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async create(dto: CreateJobDto) {
@@ -28,17 +30,20 @@ export class JobsService {
     const job = await this.prisma.job.create({
       data: {
         ...jobData,
+        status: dto.status ?? 'OPEN',
         applicationDeadline: dto.applicationDeadline ? new Date(dto.applicationDeadline) : undefined,
         driveDate: dto.driveDate ? new Date(dto.driveDate) : undefined,
       },
     });
 
-    // Add skills
+    // Add skills — wrapped in try/catch so AI normalization failure never blocks job creation
     if (requiredSkills?.length) {
-      await this.skillsService.normalizeSkillsForJob(job.id, requiredSkills, 'REQUIRED');
+      await this.skillsService.normalizeSkillsForJob(job.id, requiredSkills, 'REQUIRED')
+        .catch(err => this.logger.warn(`Required skill normalization failed (job still created): ${err.message}`));
     }
     if (preferredSkills?.length) {
-      await this.skillsService.normalizeSkillsForJob(job.id, preferredSkills, 'PREFERRED');
+      await this.skillsService.normalizeSkillsForJob(job.id, preferredSkills, 'PREFERRED')
+        .catch(err => this.logger.warn(`Preferred skill normalization failed (job still created): ${err.message}`));
     }
 
     return this.findOne(job.id);
@@ -146,8 +151,12 @@ export class JobsService {
     // Save JD file
     const savedFile = await this.filesService.saveFile(file, 'JD_DOCUMENT', uploadedBy);
 
-    // Extract raw text
-    const rawText = await this.filesService.extractTextFromFile(savedFile.id);
+    // Extract raw text with confidence/warnings
+    const extraction = await this.filesService.extractDocumentFromFile(savedFile.id);
+    const rawText = extraction.text;
+    if (extraction.needsManualReview) {
+      this.logger.warn(`JD extraction for job ${jobId} needs review: ${extraction.warnings.join('; ')}`);
+    }
 
     // AI parse the JD
     const parsed = await this.aiService.parseJobDescription(rawText);
@@ -193,6 +202,11 @@ export class JobsService {
     return {
       message: 'JD uploaded and parsed successfully',
       parsedData: parsed,
+      extraction: {
+        confidence: extraction.confidence,
+        warnings: extraction.warnings,
+        sourceType: extraction.sourceType,
+      },
       fileId: savedFile.id,
     };
   }
@@ -243,7 +257,35 @@ export class JobsService {
 
   async getJobMatches(jobId: string, limit = 50) {
     await this.findOne(jobId);
-    return this.prisma.matchResult.findMany({
+    const latestMatch = await this.prisma.matchResult.findFirst({
+      where: { jobId },
+      orderBy: { computedAt: 'desc' },
+      select: { computedAt: true },
+    });
+    const [latestStudentProfile, latestStudentSkill, latestResume] = await Promise.all([
+      this.prisma.studentProfile.findFirst({
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true },
+      }),
+      this.prisma.studentSkill.findFirst({
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true },
+      }),
+      this.prisma.resume.findFirst({
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true },
+      }),
+    ]);
+    const latestMutation = [latestStudentProfile?.updatedAt, latestStudentSkill?.updatedAt, latestResume?.updatedAt]
+      .filter((value): value is Date => Boolean(value))
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+    if (latestMatch && latestMutation && latestMutation.getTime() > latestMatch.computedAt.getTime()) {
+      this.logger.log(`Match cache for job ${jobId} is stale; recomputing after student data changes.`);
+      await this.matchingService.runMatchingForJob(jobId, { includeSemantics: false });
+    }
+
+    let matches = await this.prisma.matchResult.findMany({
       where: { jobId },
       include: {
         studentProfile: {
@@ -254,14 +296,45 @@ export class JobsService {
           },
         },
       },
-      orderBy: { overallMatchPercentage: 'desc' },
+      orderBy: [
+        { overallMatchPercentage: 'desc' },
+        { rawScore: 'desc' },
+        { overlap: 'desc' },
+        { id: 'asc' },
+      ],
       take: limit,
     });
+
+    if (!matches.length) {
+      this.logger.log(`No cached matches found for job ${jobId}; running matching now.`);
+      await this.matchingService.runMatchingForJob(jobId, { includeSemantics: false });
+      matches = await this.prisma.matchResult.findMany({
+        where: { jobId },
+        include: {
+          studentProfile: {
+            select: {
+              id: true, firstName: true, lastName: true,
+              department: true, cgpa: true, expectedGraduationYear: true,
+              user: { select: { email: true } },
+            },
+          },
+        },
+        orderBy: [
+          { overallMatchPercentage: 'desc' },
+          { rawScore: 'desc' },
+          { overlap: 'desc' },
+          { id: 'asc' },
+        ],
+        take: limit,
+      });
+    }
+
+    return matches;
   }
 
   async getJobShortlist(jobId: string) {
     await this.findOne(jobId);
-    return this.prisma.shortlist.findMany({
+    let shortlist = await this.prisma.shortlist.findMany({
       where: { jobId },
       include: {
         application: {
@@ -278,5 +351,30 @@ export class JobsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    if (!shortlist.length) {
+      this.logger.log(`No cached shortlist found for job ${jobId}; generating from live matches.`);
+      await this.matchingService.runMatchingForJob(jobId, { includeSemantics: false });
+      await this.matchingService.generateShortlist(jobId);
+      shortlist = await this.prisma.shortlist.findMany({
+        where: { jobId },
+        include: {
+          application: {
+            include: {
+              studentProfile: {
+                select: {
+                  id: true, firstName: true, lastName: true,
+                  department: true, cgpa: true,
+                  user: { select: { email: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    return shortlist;
   }
 }

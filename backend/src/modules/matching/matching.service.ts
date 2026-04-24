@@ -117,8 +117,8 @@ export class MatchingService {
 
     this.logger.log(`Matching complete: ${processed}/${students.length} processed for job ${jobId}`);
 
-    // Sort by overall match percentage desc
-    results.sort((a, b) => b.overallMatchPercentage - a.overallMatchPercentage);
+    // Sort deterministically with the paper-aligned tie-breaks
+    results.sort(MatchingEngine.compare);
     return { processed, results };
   }
 
@@ -147,7 +147,12 @@ export class MatchingService {
       include: {
         studentProfile: { select: { id: true, firstName: true, lastName: true, userId: true } },
       },
-      orderBy: { overallMatchPercentage: 'desc' },
+      orderBy: [
+        { overallMatchPercentage: 'desc' },
+        { rawScore: 'desc' },
+        { overlap: 'desc' },
+        { id: 'asc' },
+      ],
       take: maxCandidates,
     });
 
@@ -211,7 +216,12 @@ export class MatchingService {
             },
           },
         },
-        orderBy: { overallMatchPercentage: 'desc' },
+        orderBy: [
+          { overallMatchPercentage: 'desc' },
+          { rawScore: 'desc' },
+          { overlap: 'desc' },
+          { id: 'asc' },
+        ],
         skip,
         take: limit,
       }),
@@ -248,7 +258,7 @@ export class MatchingService {
     }
 
     const projectText = profile.projects
-      .map((p) => `${p.title} ${p.description} ${p.techStack.join(' ')} ${p.highlights.join(' ')}`)
+      .map((p) => `${p.title} ${p.description} ${(p.techStack || []).join(' ')} ${(p.highlights || []).join(' ')}`)
       .join('\n');
 
     const certificationText = profile.certifications
@@ -264,9 +274,37 @@ export class MatchingService {
       ? (masterResume.structuredContent as any)?.summary
       : undefined;
 
+    const structuredCourses = masterResume?.structuredContent
+      ? ((masterResume.structuredContent as any)?.coursesCompleted || (masterResume.structuredContent as any)?.coursework || [])
+      : [];
+
     const softSkillNames = profile.studentSkills
       .filter((ss) => ss.skill.category === 'SOFT_SKILLS')
       .map((ss) => ss.skill.name);
+
+    const projects = profile.projects.map((p) => ({
+      title: p.title,
+      description: p.description || '',
+      techStack: p.techStack || [],
+      highlights: p.highlights || [],
+      openSource: Boolean((p as any).repoUrl || (p as any).liveUrl),
+      deployed: Boolean((p as any).liveUrl),
+      impactLevel: ((p.highlights?.length || 0) >= 3 ? 'high' : 'medium') as 'high' | 'medium',
+      keywords: [...(p.techStack || []), ...(p.highlights || [])].map((value) => value.toLowerCase()),
+    }));
+
+    const certifications = profile.certifications.map((c) => ({
+      name: c.name,
+      issuer: c.issuingOrganization,
+      issueDate: c.issueDate,
+      expiryDate: c.expiryDate,
+      credentialId: c.credentialId,
+      credentialUrl: c.credentialUrl,
+      qrPresent: Boolean(c.credentialUrl && /qr|verify|credential/i.test(c.credentialUrl)),
+      forged: c.isForged,
+      skills: c.inferredSkills,
+      description: c.description || undefined,
+    }));
 
     return {
       profileId: studentProfileId,
@@ -274,6 +312,7 @@ export class MatchingService {
       lastName: profile.lastName,
       department: profile.department,
       cgpa: profile.cgpa,
+      gpaScale: profile.gpaScale,
       activeBacklogs: profile.activeBacklogs,
       totalBacklogs: profile.totalBacklogs,
       expectedGraduationYear: profile.expectedGraduationYear,
@@ -285,6 +324,18 @@ export class MatchingService {
       certificationText,
       achievementText,
       resumeSummary,
+      projects,
+      certifications,
+      coursesCompleted: structuredCourses.map((course: any) => ({
+        name: course.name || course.title || 'Course',
+        skills: course.skills || course.skillNames || [],
+        bloomLevel: course.bloomLevel ?? course.bloom ?? null,
+        completed: course.completed ?? true,
+      })),
+      githubActivity: profile.githubUrl ? 'moderate' : 'low',
+      selfAssessmentScores: profile.studentSkills
+        .map((ss) => (ss.confidence === 'HIGH' ? 8.5 : ss.confidence === 'MEDIUM' ? 6.5 : 4.5)),
+      experienceFlag: profile.achievements.some((a) => a.type === 'INTERNSHIP'),
       projectCount: profile.projects.length,
       certificationCount: profile.certifications.length,
       internshipCount: profile.achievements.filter((a) => a.type === 'INTERNSHIP').length,
@@ -328,6 +379,7 @@ export class MatchingService {
       preferredSkills,
       softSkillsRequired,
       rawJdText: job.rawJdText || undefined,
+      preferredKeywords: job.keywords || [],
     };
   }
 
@@ -343,12 +395,21 @@ export class MatchingService {
         eligibilityStatus: result.eligibilityStatus,
         eligibilityReasons: result.eligibilityReasons,
         overallMatchPercentage: result.overallMatchPercentage,
+        rawScore: result.rawScore,
+        overlap: result.overlap,
+        treScore: result.treScore,
+        boost: result.boost,
+        gpaOn4: result.gpaOn4,
+        rawGpa: result.rawGpa,
+        rawGpaScale: result.rawGpaScale,
         requiredSkillCoverage: result.requiredSkillCoverage,
         preferredSkillCoverage: result.preferredSkillCoverage,
         semanticSimilarity: result.semanticSimilarity,
         academicFit: result.academicFit,
         projectRelevance: result.projectRelevance,
         certificationRelevance: result.certificationRelevance,
+        fairnessAudit: result.fairnessAudit as any,
+        scoreExplanation: result.scoreExplanation as any,
         matchedSkills: result.matchedSkills as any,
         inferredMatchedSkills: result.inferredMatchedSkills as any,
         missingSkills: result.missingSkills,
@@ -363,12 +424,21 @@ export class MatchingService {
         eligibilityStatus: result.eligibilityStatus,
         eligibilityReasons: result.eligibilityReasons,
         overallMatchPercentage: result.overallMatchPercentage,
+        rawScore: result.rawScore,
+        overlap: result.overlap,
+        treScore: result.treScore,
+        boost: result.boost,
+        gpaOn4: result.gpaOn4,
+        rawGpa: result.rawGpa,
+        rawGpaScale: result.rawGpaScale,
         requiredSkillCoverage: result.requiredSkillCoverage,
         preferredSkillCoverage: result.preferredSkillCoverage,
         semanticSimilarity: result.semanticSimilarity,
         academicFit: result.academicFit,
         projectRelevance: result.projectRelevance,
         certificationRelevance: result.certificationRelevance,
+        fairnessAudit: result.fairnessAudit as any,
+        scoreExplanation: result.scoreExplanation as any,
         matchedSkills: result.matchedSkills as any,
         inferredMatchedSkills: result.inferredMatchedSkills as any,
         missingSkills: result.missingSkills,

@@ -1,9 +1,9 @@
-/**
- * Admin — AI Matching Engine
- * IEEE-level hybrid algorithm display:
- *   Score = 0.35·Skill + 0.20·Major + 0.15·Experience + 0.15·Domain + 0.10·Academic + 0.05·Bonus
+﻿/**
+ * Admin -- AI Matching Engine
+ * HSGM-aligned match review:
+ *   Score = semantic + overlap + TRE + certificate relevance + curriculum + trust
  *
- * Features: fuzzy skill matching · bias mitigation · hidden talent detection · 6-dimension breakdown
+ * Features: explainable ranking Â· bias audit Â· hidden talent detection Â· feature breakdown
  */
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,11 +12,11 @@ import {
   Play, RefreshCw, CheckCircle, Award, AlertTriangle, Sparkles,
   BookOpen, Layers, BarChart3, ShieldCheck,
 } from 'lucide-react';
-import { MOCK_MATCH_RESULTS, MOCK_JOBS } from '@/lib/mock-data';
 import { useAdminJobs, useAdminRunMatching, useMatchResults } from '@/hooks/api';
+import EmptyState from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type Recommendation = 'HIGHLY_RECOMMENDED' | 'RECOMMENDED' | 'BORDERLINE' | 'NOT_RECOMMENDED';
 type Tab = 'ALL' | Recommendation;
@@ -25,13 +25,14 @@ interface MatchData {
   id: string;
   studentProfileId: string;
   jobId: string;
-  studentProfile?: { id: string; firstName: string; lastName: string; department: string; cgpa: number; expectedGraduationYear: number };
+  studentProfile?: { id: string; firstName: string; lastName: string; department: string; cgpa?: number; expectedGraduationYear?: number };
   eligibilityStatus: string;
   eligibilityReasons: string[];
   overallMatchPercentage: number;
   requiredSkillCoverage: number;
   preferredSkillCoverage: number;
   semanticSimilarity: number;
+  treScore?: number;
   academicFit: number;
   projectRelevance: number;
   certificationRelevance: number;
@@ -52,7 +53,7 @@ interface MatchData {
   reasonSummary?: string;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const RECOMMENDATION_CONFIG: Record<Recommendation, { label: string; color: string; bg: string; border: string; dot: string }> = {
   HIGHLY_RECOMMENDED: { label: 'Highly Recommended', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', dot: 'bg-emerald-500' },
@@ -84,7 +85,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'NOT_RECOMMENDED', label: 'Not Recommended' },
 ];
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ScoreCircle({ score, size = 'md' }: { score: number; size?: 'sm' | 'md' | 'lg' }) {
   const color = score >= 75 ? '#10b981' : score >= 58 ? '#3b82f6' : score >= 38 ? '#f59e0b' : '#9ca3af';
@@ -145,33 +146,21 @@ function SkillPill({ name, variant }: { name: string; variant: 'matched' | 'fuzz
   };
   return (
     <span className={cn('text-[10px] font-medium px-2 py-0.5 rounded-md border', styles[variant])}>
-      {variant === 'fuzzy' ? '≈ ' : ''}{name}
-    </span>
-  );
-}
-
-function WeightProfileBadge({ profile }: { profile: string }) {
-  const configs: Record<string, { label: string; color: string }> = {
-    TECH_HEAVY:   { label: 'Tech-Heavy', color: 'bg-brand-oxford/10 text-brand-oxford' },
-    BALANCED:     { label: 'Balanced',   color: 'bg-gray-100 text-gray-600' },
-    DATA_SCIENCE: { label: 'Data Science', color: 'bg-purple-100 text-purple-700' },
-    ACADEMIC:     { label: 'Academic',   color: 'bg-green-100 text-green-700' },
-  };
-  const cfg = configs[profile] ?? configs['BALANCED'];
-  return (
-    <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider', cfg.color)}>
-      {cfg.label}
+      {variant === 'fuzzy' ? 'â‰ˆ ' : ''}{name}
     </span>
   );
 }
 
 function ExpandedBreakdown({ match }: { match: MatchData }) {
-  const majorScore = match.majorAlignmentScore ?? match.academicFit;
-  const expScore   = match.experienceLevelScore ?? match.projectRelevance;
-  const domScore   = match.domainAlignmentScore ?? match.semanticSimilarity;
-  const bonus      = match.bonusScore ?? match.certificationRelevance;
-  const fuzzy      = match.fuzzySkillMatches ?? [];
-  const inferred   = match.inferredMatchedSkills ?? [];
+  const treScore = (match.treScore ?? 0) * 100;
+  const trustScore = match.bonusScore ?? match.certificationRelevance;
+  const semanticScore = match.semanticSimilarity;
+  const overlapScore = match.requiredSkillCoverage;
+  const gpaScore = match.academicFit;
+  const curriculumScore = match.majorAlignmentScore ?? 0;
+  const projectScore = match.projectRelevance;
+  const fuzzy = match.fuzzySkillMatches ?? [];
+  const inferred = match.inferredMatchedSkills ?? [];
 
   return (
     <motion.div
@@ -182,18 +171,85 @@ function ExpandedBreakdown({ match }: { match: MatchData }) {
       className="overflow-hidden"
     >
       <div className="mt-4 pt-4 border-t border-border space-y-4">
-        {/* 6-dimension score bars */}
+        {/* HSGM feature bars */}
         <div>
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-3">
-            6-Dimension IEEE Score Breakdown
+            HSGM Feature Breakdown
           </p>
-          <div className="grid grid-cols-2 gap-x-8 gap-y-2.5">
-            <MiniBar label="Required Skills"  value={match.requiredSkillCoverage} colorClass={SCORE_COLORS.skill}      icon={<Zap className="w-2.5 h-2.5" />} />
-            <MiniBar label="Major Alignment"  value={majorScore}                  colorClass={SCORE_COLORS.major}      icon={<BookOpen className="w-2.5 h-2.5" />} />
-            <MiniBar label="Experience Level" value={expScore}                    colorClass={SCORE_COLORS.experience}  icon={<TrendingUp className="w-2.5 h-2.5" />} />
-            <MiniBar label="Domain Alignment" value={domScore}                    colorClass={SCORE_COLORS.domain}     icon={<Layers className="w-2.5 h-2.5" />} />
-            <MiniBar label="Academic Fit"     value={match.academicFit}          colorClass={SCORE_COLORS.academic}   icon={<BarChart3 className="w-2.5 h-2.5" />} />
-            <MiniBar label="Bonus Attributes" value={bonus}                       colorClass={SCORE_COLORS.bonus}      icon={<Award className="w-2.5 h-2.5" />} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5 rounded-xl border border-border/60 bg-white/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-muted-foreground flex-shrink-0"><Zap className="w-3 h-3" /></span>
+                  <span className="text-[11px] font-semibold text-foreground truncate">Required Skill Coverage</span>
+                </div>
+                <span className="text-[11px] font-bold text-foreground flex-shrink-0">{Math.round(overlapScore)}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(overlapScore, 100)}%` }} transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }} className={cn('h-full rounded-full', SCORE_COLORS.skill)} />
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">Direct overlap with required JD skills.</p>
+            </div>
+            <div className="space-y-1.5 rounded-xl border border-border/60 bg-white/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-muted-foreground flex-shrink-0"><BookOpen className="w-3 h-3" /></span>
+                  <span className="text-[11px] font-semibold text-foreground truncate">Semantic Fit</span>
+                </div>
+                <span className="text-[11px] font-bold text-foreground flex-shrink-0">{Math.round(semanticScore)}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(semanticScore, 100)}%` }} transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }} className={cn('h-full rounded-full', SCORE_COLORS.domain)} />
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">Resume and JD meaning similarity.</p>
+            </div>
+            <div className="space-y-1.5 rounded-xl border border-border/60 bg-white/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-muted-foreground flex-shrink-0"><TrendingUp className="w-3 h-3" /></span>
+                  <span className="text-[11px] font-semibold text-foreground truncate">TRE</span>
+                </div>
+                <span className="text-[11px] font-bold text-foreground flex-shrink-0">{Math.round(treScore)}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(treScore, 100)}%` }} transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }} className={cn('h-full rounded-full', SCORE_COLORS.experience)} />
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">Trajectory from projects, competitions, leadership, and open source.</p>
+            </div>
+            <div className="space-y-1.5 rounded-xl border border-border/60 bg-white/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-muted-foreground flex-shrink-0"><BarChart3 className="w-3 h-3" /></span>
+                  <span className="text-[11px] font-semibold text-foreground truncate">GPA</span>
+                </div>
+                <span className="text-[11px] font-bold text-foreground flex-shrink-0">{Math.round(gpaScore)}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(gpaScore, 100)}%` }} transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }} className={cn('h-full rounded-full', SCORE_COLORS.academic)} />
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">Normalized academic signal on the display scale.</p>
+            </div>
+            <div className="space-y-1.5 rounded-xl border border-border/60 bg-white/70 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-muted-foreground flex-shrink-0"><Award className="w-3 h-3" /></span>
+                  <span className="text-[11px] font-semibold text-foreground truncate">Certificate Trust</span>
+                </div>
+                <span className="text-[11px] font-bold text-foreground flex-shrink-0">{Math.round(trustScore)}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(trustScore, 100)}%` }} transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }} className={cn('h-full rounded-full', SCORE_COLORS.bonus)} />
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">Trust-weighted certificate relevance, not a binary flag.</p>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px] text-muted-foreground">
+            <div className="rounded-lg bg-gray-50 px-3 py-2">
+              <span className="font-semibold text-foreground">Curriculum coverage:</span> {Math.round(curriculumScore)}%
+            </div>
+            <div className="rounded-lg bg-gray-50 px-3 py-2">
+              <span className="font-semibold text-foreground">Project relevance:</span> {Math.round(projectScore)}%
+            </div>
           </div>
         </div>
 
@@ -215,17 +271,17 @@ function ExpandedBreakdown({ match }: { match: MatchData }) {
                         {f.path.map((node, ni) => (
                           <span key={ni} className="flex items-center gap-0.5">
                             <span className="bg-white border border-teal-300 px-1 py-0.5 rounded text-[9px] font-bold">{node}</span>
-                            {ni < f.path!.length - 1 && <span className="text-teal-400 text-[9px]">→</span>}
+                            {ni < f.path!.length - 1 && <span className="text-teal-400 text-[9px]">â†’</span>}
                           </span>
                         ))}
                       </span>
                     ) : (
                       <span className="text-[10px] font-mono font-bold text-teal-800">
-                        {f.jobSkill} ≈ {f.matchedWith}
+                        {f.jobSkill} â‰ˆ {f.matchedWith}
                       </span>
                     )}
                     <span className={`text-[9px] font-bold ml-1 ${hopColor}`}>
-                      {Math.round(f.similarity * 100)}% · {hopLabel}
+                      {Math.round(f.similarity * 100)}% Â· {hopLabel}
                     </span>
                     <span className="text-[9px] text-muted-foreground">+{f.partialScore.toFixed(1)}pts</span>
                   </div>
@@ -286,7 +342,7 @@ function ExpandedBreakdown({ match }: { match: MatchData }) {
               return (
                 <div key={i} className="flex items-start gap-1.5">
                   <span className={cn('text-[10px] mt-0.5', ok ? 'text-emerald-500' : partial ? 'text-amber-500' : 'text-red-500')}>
-                    {ok ? '✓' : partial ? '⚠' : '✗'}
+                    {ok ? 'âœ“' : partial ? 'âš ' : 'âœ—'}
                   </span>
                   <span className="text-[11px] text-muted-foreground">{r}</span>
                 </div>
@@ -304,10 +360,12 @@ function CandidateRow({ match, rank }: { match: MatchData; rank: number }) {
   const recCfg   = RECOMMENDATION_CONFIG[match.recommendation] ?? RECOMMENDATION_CONFIG.NOT_RECOMMENDED;
   const eligCfg  = ELIGIBILITY_CONFIG[match.eligibilityStatus] ?? ELIGIBILITY_CONFIG.INELIGIBLE;
   const student  = match.studentProfile;
-  const expScore = match.experienceLevelScore ?? match.projectRelevance;
-  const domScore = match.domainAlignmentScore ?? match.semanticSimilarity;
-  const majScore = match.majorAlignmentScore  ?? match.academicFit;
-  const bonScore = match.bonusScore           ?? match.certificationRelevance;
+  const treScore = (match.treScore ?? 0) * 100;
+  const trustScore = match.bonusScore ?? match.certificationRelevance;
+  const semanticScore = match.semanticSimilarity;
+  const overlapScore = match.requiredSkillCoverage;
+  const gpaScore = match.academicFit;
+  const projectScore = match.projectRelevance;
 
   return (
     <motion.div
@@ -344,18 +402,22 @@ function CandidateRow({ match, rank }: { match: MatchData; rank: number }) {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="truncate max-w-[180px]">{student?.department ?? '—'}</span>
+            <span className="truncate max-w-[180px]">{student?.department ?? 'â€”'}</span>
             {student?.cgpa && <span className="flex-shrink-0">CGPA {student.cgpa}</span>}
             {student?.expectedGraduationYear && <span className="flex-shrink-0">{student.expectedGraduationYear}</span>}
-            {match.weightProfile && <WeightProfileBadge profile={match.weightProfile} />}
+            {match.reasonSummary && <span className="truncate max-w-[320px] text-[11px] text-muted-foreground">{match.reasonSummary}</span>}
           </div>
 
-          {/* 4 mini bars (compact row) */}
-          <div className="mt-2 grid grid-cols-4 gap-2">
-            <MiniBar label="Skills"     value={match.requiredSkillCoverage} colorClass={SCORE_COLORS.skill}      icon={<Zap className="w-2 h-2" />} />
-            <MiniBar label="Major"      value={majScore}                    colorClass={SCORE_COLORS.major}      icon={<BookOpen className="w-2 h-2" />} />
-            <MiniBar label="Exp."       value={expScore}                    colorClass={SCORE_COLORS.experience}  icon={<TrendingUp className="w-2 h-2" />} />
-            <MiniBar label="Domain"     value={domScore}                    colorClass={SCORE_COLORS.domain}     icon={<Layers className="w-2 h-2" />} />
+          {/* HSGM feature bars */}
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <MiniBar label="Skills" value={overlapScore} colorClass={SCORE_COLORS.skill} icon={<Zap className="w-2 h-2" />} />
+            <MiniBar label="Semantic" value={semanticScore} colorClass={SCORE_COLORS.domain} icon={<BookOpen className="w-2 h-2" />} />
+            <MiniBar label="TRE" value={treScore} colorClass={SCORE_COLORS.experience} icon={<TrendingUp className="w-2 h-2" />} />
+            <MiniBar label="GPA" value={gpaScore} colorClass={SCORE_COLORS.academic} icon={<Layers className="w-2 h-2" />} />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+            <span className="rounded-full bg-gray-50 px-2 py-1">Project {Math.round(projectScore)}%</span>
+            <span className="rounded-full bg-gray-50 px-2 py-1">Trust {Math.round(trustScore)}%</span>
           </div>
         </div>
 
@@ -372,7 +434,9 @@ function CandidateRow({ match, rank }: { match: MatchData; rank: number }) {
               {recCfg.label}
             </span>
           </div>
-          {/* Score circle */}
+          <span className="text-[10px] font-semibold text-muted-foreground px-2 py-0.5 rounded-full bg-gray-50 self-start mt-0.5">
+            HSGM
+          </span>
           <ScoreCircle score={match.overallMatchPercentage} size="md" />
           <button
             onClick={() => setExpanded(v => !v)}
@@ -391,7 +455,7 @@ function CandidateRow({ match, rank }: { match: MatchData; rank: number }) {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function AdminMatching() {
   const [selectedJob, setSelectedJob] = useState<string>('');
@@ -402,14 +466,20 @@ export default function AdminMatching() {
   const runMatchingMutation    = useAdminRunMatching();
   const { data: liveResults }  = useMatchResults(selectedJob);
 
-  const allJobs = liveJobs ?? MOCK_JOBS;
+  const allJobs = liveJobs ?? [];
 
-  // Merge: run results take priority over cached DB results, fallback to mock
   const rawMatches: MatchData[] = useMemo(() => {
-    if (runResults && runResults.length > 0) return runResults;
+    if (runResults && runResults.length > 0) {
+      const liveByStudent = new Map(
+        (liveResults ?? []).map((match) => [match.studentProfileId, match]),
+      );
+      return runResults.map((match) => {
+        const hydrated = liveByStudent.get(match.studentProfileId);
+        return hydrated ? { ...match, studentProfile: hydrated.studentProfile ?? match.studentProfile } : match;
+      });
+    }
     if (selectedJob && liveResults && liveResults.length > 0) return liveResults as MatchData[];
-    const mock = MOCK_MATCH_RESULTS as unknown as MatchData[];
-    return selectedJob ? mock.filter(m => m.jobId === selectedJob) : mock;
+    return [];
   }, [runResults, selectedJob, liveResults]);
 
   const filtered = useMemo(() => {
@@ -453,15 +523,15 @@ export default function AdminMatching() {
           <Brain className="w-5 h-5" /> AI Matching Engine
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Graph-enhanced IEEE hybrid · 130-skill knowledge graph · BFS semantic matching · Bias mitigation · Hidden talent detection
+          HSGM-aligned ranking · explainable feature graph · semantic matching · bias mitigation · hidden talent detection
         </p>
         {/* Formula pill */}
         <div className="mt-2 flex flex-wrap gap-2">
           <div className="inline-flex items-center gap-1 bg-brand-oxford/5 border border-brand-oxford/10 text-[10px] font-mono text-brand-oxford px-3 py-1.5 rounded-full">
-            Score = W<sub>s</sub>·Skill + W<sub>m</sub>·Major + W<sub>e</sub>·Exp + W<sub>d</sub>·Domain + W<sub>a</sub>·Academic + W<sub>b</sub>·Bonus
+            Score = semantic + overlap + TRE + cert trust + curriculum + GPA
           </div>
           <div className="inline-flex items-center gap-1.5 bg-purple-50 border border-purple-200 text-[10px] font-semibold text-purple-700 px-3 py-1.5 rounded-full">
-            <Brain className="w-3 h-3" /> Weights auto-tuned per job: Tech-Heavy · Data Science · Academic · Balanced
+            <Brain className="w-3 h-3" /> Feature weights stay deterministic per job family
           </div>
         </div>
       </div>
@@ -481,11 +551,11 @@ export default function AdminMatching() {
               onChange={e => { setSelectedJob(e.target.value); setRunResults(null); setActiveTab('ALL'); }}
               className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-border bg-white outline-none focus:border-brand-oxford focus:ring-2 focus:ring-brand-oxford/10 transition-all"
             >
-              <option value="">— All Jobs (demo) —</option>
-              {allJobs.map(j => (
-                <option key={j.id} value={j.id}>{j.title} — {(j as any).company?.name}</option>
-              ))}
-            </select>
+            <option value="">-- Select a job --</option>
+            {allJobs.map(j => (
+              <option key={j.id} value={j.id}>{j.title} -- {(j as any).company?.name}</option>
+            ))}
+          </select>
           </div>
           <button
             onClick={handleRun}
@@ -505,7 +575,7 @@ export default function AdminMatching() {
             className="flex items-center gap-2 bg-emerald-50 text-emerald-700 text-xs font-semibold px-3 py-2.5 rounded-xl border border-emerald-200"
           >
             <CheckCircle className="w-4 h-4" />
-            Matching complete — {stats.total} candidates scored using IEEE hybrid algorithm
+            Matching complete -- {stats.total} candidates scored
           </motion.div>
         )}
 
@@ -516,7 +586,7 @@ export default function AdminMatching() {
             { icon: <Zap className="w-3 h-3" />, label: '3-Hop Transitive Skills' },
             { icon: <ShieldCheck className="w-3 h-3" />, label: 'Bias Mitigation' },
             { icon: <Sparkles className="w-3 h-3" />, label: 'Hidden Talent Detection' },
-            { icon: <BarChart3 className="w-3 h-3" />, label: '6-Dimension Scoring' },
+            { icon: <BarChart3 className="w-3 h-3" />, label: 'Feature Scoring' },
             { icon: <Target className="w-3 h-3" />, label: 'Student Skill Expansion' },
           ].map((b, i) => (
             <span key={i} className="inline-flex items-center gap-1 text-[10px] font-semibold bg-brand-oxford/5 text-brand-oxford border border-brand-oxford/10 px-2 py-1 rounded-full">
@@ -576,10 +646,11 @@ export default function AdminMatching() {
       {/* Candidate list */}
       <div className="space-y-3">
         {filtered.length === 0 ? (
-          <div className="text-center py-12 text-sm text-muted-foreground">
-            <AlertTriangle className="w-8 h-8 mx-auto mb-3 opacity-30" />
-            No candidates in this category. {!selectedJob && 'Select a job and run matching.'}
-          </div>
+          <EmptyState
+            icon={AlertTriangle}
+            title={selectedJob ? 'No match results yet' : 'Select a job to inspect matches'}
+            description={selectedJob ? 'Run matching to compute fresh explanations, verdicts, and fairness audit output.' : 'Choose a live job posting above to see the ranked candidate list.'}
+          />
         ) : (
           filtered.map((match, i) => (
             <CandidateRow key={match.id} match={match} rank={i + 1} />
@@ -593,22 +664,24 @@ export default function AdminMatching() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className="text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-full">HIDDEN TALENT</span>
-            High skill coverage despite lower academics — bias mitigation applied
+            High skill coverage despite lower academics -- bias mitigation applied
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[9px] font-bold bg-teal-100 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded-full">BIAS ADJ.</span>
             Algorithm adjusted scoring to prevent over-penalizing non-traditional profiles
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded">A→B→C</span>
-            Graph path: skill matched via BFS traversal (e.g. NestJS→Node.js→Express: 2-hop)
+            <span className="text-[10px] font-mono bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded">Aâ†’Bâ†’C</span>
+            Graph path: skill matched via BFS traversal (e.g. NestJSâ†’Node.jsâ†’Express: 2-hop)
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[9px] font-bold bg-brand-oxford/10 text-brand-oxford px-1.5 py-0.5 rounded">TECH-HEAVY</span>
-            Weight profile auto-detected from job requirements
+            HSGM signals adapt to the job requirements
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+

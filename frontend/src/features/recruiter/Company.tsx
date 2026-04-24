@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { Building2, Globe, Mail, Phone, MapPin, Edit2, Save } from 'lucide-react';
 import SectionCard from '@/components/shared/SectionCard';
-import { MOCK_COMPANIES } from '@/lib/mock-data';
-import { useCompanies } from '@/hooks/api';
+import { useCompany, useMe } from '@/hooks/api';
 import { cn } from '@/lib/utils';
 
 const inputClass = 'w-full text-sm px-3.5 py-2.5 rounded-xl border border-border bg-white outline-none transition-all focus:border-brand-oxford focus:ring-2 focus:ring-brand-oxford/10';
 
 export default function RecruiterCompany() {
   const [editing, setEditing] = useState(false);
-  const { data: companies } = useCompanies();
-  const company = companies?.[0] ?? MOCK_COMPANIES[0];
+  const { data: me } = useMe();
+  const companyId = me?.recruiterProfile?.company?.id;
+  const { data: company } = useCompany(companyId ?? '');
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -31,6 +31,15 @@ export default function RecruiterCompany() {
       </div>
 
       <SectionCard title="Company Details" icon={Building2}>
+        {!companyId ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            No company is linked to this recruiter account yet. Attach a company profile to enable job posting from this account.
+          </div>
+        ) : !company ? (
+          <div className="rounded-xl border border-border bg-gray-50 px-4 py-3 text-sm text-muted-foreground">
+            Loading company profile...
+          </div>
+        ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl bg-brand-oxford/8 flex items-center justify-center flex-shrink-0">
@@ -71,6 +80,7 @@ export default function RecruiterCompany() {
             </div>
           </div>
         </div>
+        )}
       </SectionCard>
     </div>
   );
