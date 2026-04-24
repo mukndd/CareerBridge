@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users, Building2, Briefcase, TrendingUp, CheckCircle, Clock,
@@ -9,11 +10,6 @@ import SectionCard from '@/components/shared/SectionCard';
 import AIInsightCard from '@/components/shared/AIInsightCard';
 import { useAdminAnalytics, useAdminCompanies } from '@/hooks/api';
 
-const AI_INSIGHTS = [
-  { message: 'Google SWE Internship has 0 applications but 3 eligible students. Send a targeted nudge.', action: 'Send nudge', priority: 'high' as const },
-  { message: 'Average match score dropped 4% this week — 2 students have unverified skills. Review profiles.', action: 'Review', priority: 'medium' as const },
-  { message: 'TCS Digital deadline in 5 days — 12 eligible students haven\'t applied yet.', action: 'Notify students', priority: 'high' as const },
-];
 
 const TIMELINE = [
   { text: 'Google shortlist exported (8 candidates)', time: '30m ago', dot: 'bg-green-500' },
@@ -26,6 +22,51 @@ const TIMELINE = [
 export default function AdminDashboard() {
   const { data: liveAnalytics } = useAdminAnalytics();
   const { data: liveCompanies } = useAdminCompanies();
+
+  const dynamicInsights = useMemo(() => {
+    if (!liveAnalytics) {
+      return [{ message: 'Loading placement data…', action: 'Refresh', priority: 'medium' as const }];
+    }
+    const { overview, shortlistBreakdown, applicationStatusBreakdown } = liveAnalytics;
+    const insights: { message: string; action: string; priority: 'high' | 'medium' | 'low' }[] = [];
+
+    const highRec = (shortlistBreakdown.HIGHLY_RECOMMENDED ?? 0) + (shortlistBreakdown.RECOMMENDED ?? 0);
+    if (highRec > 0) {
+      insights.push({
+        message: `${highRec} candidate${highRec > 1 ? 's' : ''} are recommended across active jobs. Review shortlists to move them forward.`,
+        action: 'Review shortlists',
+        priority: 'high',
+      });
+    }
+
+    const pendingReview = applicationStatusBreakdown.UNDER_REVIEW ?? 0;
+    if (pendingReview > 5) {
+      insights.push({
+        message: `${pendingReview} applications are pending review. Batch-process them to keep the pipeline moving.`,
+        action: 'Review',
+        priority: 'medium',
+      });
+    }
+
+    if (overview.totalMatches > 0 && overview.totalStudents > 0) {
+      const matchRate = Math.round((overview.totalMatches / overview.totalStudents) * 100);
+      insights.push({
+        message: `AI matching coverage is at ${matchRate}% of students. Run batch matching to improve coverage.`,
+        action: 'Run matching',
+        priority: matchRate < 50 ? 'high' : 'medium',
+      });
+    }
+
+    if (insights.length === 0) {
+      insights.push({
+        message: 'All systems operational. Run AI matching on new jobs to get placement recommendations.',
+        action: 'Run matching',
+        priority: 'medium',
+      });
+    }
+
+    return insights.slice(0, 3);
+  }, [liveAnalytics]);
 
   const analytics = liveAnalytics ?? {
     overview: {
@@ -153,17 +194,17 @@ export default function AdminDashboard() {
 
         {/* Sidebar */}
         <div className="space-y-5">
-          <AIInsightCard title="Placement Cell AI" insights={AI_INSIGHTS} />
+          <AIInsightCard title="Placement Cell AI" insights={dynamicInsights} />
 
           {/* Application stats */}
           <SectionCard title="Application Status" icon={CheckCircle}>
             <div className="space-y-2.5">
               {[
-                { label: 'Pending Review', value: analytics.applicationStatusBreakdown.UNDER_REVIEW ?? 18, color: 'bg-gray-200' },
+                { label: 'Pending Review', value: analytics.applicationStatusBreakdown.UNDER_REVIEW ?? 0, color: 'bg-gray-200' },
                 { label: 'Shortlisted', value: analytics.applicationStatusBreakdown.SHORTLISTED ?? 0, color: 'bg-blue-400' },
-                { label: 'Interviews', value: analytics.applicationStatusBreakdown.INTERVIEW_SCHEDULED ?? 6, color: 'bg-amber-400' },
+                { label: 'Interviews', value: analytics.applicationStatusBreakdown.INTERVIEW_SCHEDULED ?? 0, color: 'bg-amber-400' },
                 { label: 'Offered', value: analytics.applicationStatusBreakdown.SELECTED ?? 0, color: 'bg-green-500' },
-                { label: 'Rejected', value: 9, color: 'bg-red-400' },
+                { label: 'Rejected', value: analytics.applicationStatusBreakdown.REJECTED ?? 0, color: 'bg-red-400' },
               ].map((s, i) => (
                 <div key={i} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">

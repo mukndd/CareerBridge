@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Download, Mail, Trash2, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import SectionCard from '@/components/shared/SectionCard';
 import EmptyState from '@/components/shared/EmptyState';
-import { useGenerateShortlist, useJobs, useJobShortlist } from '@/hooks/api';
+import { useGenerateShortlist, useJobMatches, useJobs, useJobShortlist } from '@/hooks/api';
 import { cn } from '@/lib/utils';
 import type { Shortlist } from '@/types';
 
@@ -13,7 +13,16 @@ export default function RecruiterShortlist() {
   const autoGenerateJobs = useRef<Set<string>>(new Set());
   const { data: liveJobs } = useJobs();
   const { data: liveShortlist } = useJobShortlist(selectedJob);
+  const { data: liveMatches } = useJobMatches(selectedJob);
   const generateShortlist = useGenerateShortlist();
+
+  const matchScoreByStudent = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of liveMatches ?? []) {
+      if (m.studentProfileId) map.set(m.studentProfileId, m.overallMatchPercentage);
+    }
+    return map;
+  }, [liveMatches]);
 
   useEffect(() => {
     if (!selectedJob && liveJobs?.length) {
@@ -96,6 +105,7 @@ export default function RecruiterShortlist() {
               const displayName = profile ? `${profile.firstName} ${profile.lastName}` : 'Student';
               const dept = profile?.department ?? 'Unknown department';
               const cgpa = profile?.cgpa ? `CGPA ${profile.cgpa}` : 'CGPA n/a';
+              const matchScore = profile?.id ? matchScoreByStudent.get(profile.id) : undefined;
 
               return (
                 <motion.div
@@ -119,6 +129,11 @@ export default function RecruiterShortlist() {
                   </div>
 
                   <div className="flex items-center gap-3 flex-shrink-0">
+                    {matchScore !== undefined && (
+                      <span className="text-xs font-bold text-brand-oxford bg-brand-oxford/8 border border-brand-oxford/15 px-2.5 py-1 rounded-lg">
+                        {matchScore}%
+                      </span>
+                    )}
                     <span
                       className={cn(
                         'px-2.5 py-1 rounded-lg text-xs font-semibold',

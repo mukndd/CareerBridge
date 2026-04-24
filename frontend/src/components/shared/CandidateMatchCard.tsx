@@ -75,6 +75,23 @@ export default function CandidateMatchCard({ match, onShortlist, onView, isShort
         </div>
       )}
 
+      {match.missingSkills && match.missingSkills.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {match.missingSkills.slice(0, 3).map((s, i) => (
+            <SkillChip key={i} name={s} variant="missing" />
+          ))}
+          {match.missingSkills.length > 3 && (
+            <span className="text-[11px] text-red-500 self-center">+{match.missingSkills.length - 3} missing</span>
+          )}
+        </div>
+      )}
+
+      {(match.inferredMatchedSkills?.length ?? 0) > 0 && (
+        <p className="text-[10px] text-teal-600 mt-1.5">
+          +{match.inferredMatchedSkills!.length} inferred skill{match.inferredMatchedSkills!.length > 1 ? 's' : ''} via knowledge graph
+        </p>
+      )}
+
       {/* Score breakdown bars */}
       <div className="mt-3 space-y-1.5">
         <MiniScoreBar label="Skills" value={match.requiredSkillCoverage} color="bg-brand-oxford" />
