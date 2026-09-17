@@ -18,6 +18,15 @@ import {
   ApplicationStatus,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+
+// Demo passwords are read from env vars so a deployed instance doesn't ship
+// with the same publicly-documented password forever. Locally (no env var
+// set) a random one is generated per run and printed below — copy it from
+// the console output, don't hardcode it anywhere.
+function demoPassword(envVar: string): string {
+  return process.env[envVar] ?? crypto.randomBytes(9).toString('base64url');
+}
 
 const prisma = new PrismaClient();
 
@@ -648,7 +657,8 @@ async function main() {
   await seedSkills();
 
   // 2. Create admin
-  const adminHash = await bcrypt.hash('Admin@DSU2025', 12);
+  const adminPassword = demoPassword('SEED_ADMIN_PASSWORD');
+  const adminHash = await bcrypt.hash(adminPassword, 12);
   const adminUser = await prisma.user.create({
     data: {
       email: 'admin@dsu.edu.in',
@@ -665,15 +675,16 @@ async function main() {
       },
     },
   });
-  console.log(`\n👤 Admin created: admin@dsu.edu.in (Password: Admin@DSU2025)`);
+  console.log(`\n👤 Admin created: admin@dsu.edu.in (Password: ${adminPassword})`);
 
   // 3. Create companies + recruiters
+  const recruiterPassword = demoPassword('SEED_RECRUITER_PASSWORD');
   const companyRecords: Awaited<ReturnType<typeof prisma.company.create>>[] = [];
   for (const companyData of COMPANIES) {
     const company = await prisma.company.create({ data: companyData });
     companyRecords.push(company);
 
-    const hash = await bcrypt.hash('Recruiter@123', 12);
+    const hash = await bcrypt.hash(recruiterPassword, 12);
     await prisma.user.create({
       data: {
         email: `recruiter@${company.name.toLowerCase().replace(/[^a-z]/g, '')}.com`,
@@ -728,9 +739,10 @@ async function main() {
   console.log(`💼 ${jobRecords.length} jobs created`);
 
   // 5. Create students
+  const studentPassword = demoPassword('SEED_STUDENT_PASSWORD');
   for (const studentData of STUDENTS) {
     const { projects, certifications, achievements, skills, ...profileData } = studentData;
-    const hash = await bcrypt.hash('Student@123', 12);
+    const hash = await bcrypt.hash(studentPassword, 12);
 
     const user = await prisma.user.create({
       data: {
@@ -832,11 +844,13 @@ async function main() {
   console.log('📝 Sample applications created');
 
   console.log('\n✅ Seed complete!\n');
-  console.log('📋 Demo credentials:');
-  console.log('   Admin:     admin@dsu.edu.in / Admin@DSU2025');
-  console.log('   Students:  ravi.kumar@dsu.edu.in / Student@123');
-  console.log('             priya.sharma@dsu.edu.in / Student@123');
-  console.log('   Recruiter: recruiter@infosyslimited.com / Recruiter@123\n');
+  console.log('📋 Demo credentials (this run only, not stored anywhere else):');
+  console.log(`   Admin:     admin@dsu.edu.in / ${adminPassword}`);
+  console.log(`   Students:  ravi.kumar@dsu.edu.in / ${studentPassword}`);
+  console.log(`             priya.sharma@dsu.edu.in / ${studentPassword}`);
+  console.log(`   Recruiter: recruiter@infosyslimited.com / ${recruiterPassword}`);
+  console.log('\n⚠️  Set SEED_ADMIN_PASSWORD / SEED_RECRUITER_PASSWORD / SEED_STUDENT_PASSWORD');
+  console.log('   before seeding any publicly-reachable deployment.\n');
 }
 
 main()
